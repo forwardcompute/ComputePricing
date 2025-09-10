@@ -1,0 +1,23 @@
+{
+  "gpu_model": "H100",
+  "region": "Global",
+  "fleet_gpus": 80,
+  "price_per_gpu_hr_initial": 2.325,
+  "oversub_multiplier": 2.0,
+  "price_erosion_yoy": 0.2,
+  "util_model": "linear",
+  "util_start_pct": 0.35,
+  "util_peak_pct": 0.85,
+  "util_months_to_peak": 18,
+  "watts_per_gpu": 350,
+  "usd_per_kwh": 0.12,
+  "other_opex_usd_per_month": 0.0,
+  "capex_usd": 2400000,
+  "capex_month0": true,
+  "depreciation_months": 36,
+  "tax_rate": 0.0,
+  "months": 60,
+  "payback_month": 23,
+  "irr_monthly": 0.03261738789953898,
+  "irr_annualized": 0.4698506356943497
+}

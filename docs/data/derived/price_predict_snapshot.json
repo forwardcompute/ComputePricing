@@ -1,0 +1,16 @@
+{
+  "asof_utc": "2025-09-10T16:30:34+00:00",
+  "gpu_model": "H100",
+  "type": "On-Demand",
+  "gpu_vram_gb": null,
+  "cpu_cores": null,
+  "cpu_ram_gb": null,
+  "region": "US",
+  "n": 1,
+  "used_region": "US",
+  "p10": 1.99,
+  "p25": 1.99,
+  "p50": 1.99,
+  "p75": 1.99,
+  "p90": 1.99
+}

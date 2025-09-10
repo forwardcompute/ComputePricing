@@ -1,505 +1,345 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <title>Price-IQ • GPU Market Dashboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <style>
-    :root { --bg:#0f1115; --panel:#151923; --muted:#9aa4b2; --text:#e8eef7; --accent:#7aa2f7; --ok:#47d18c; --bad:#ff6b6b; }
-    * { box-sizing: border-box; }
-    body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial; color: var(--text); background: var(--bg); }
-    header { padding: 20px; border-bottom: 1px solid #1e2430; background: #0f131c; position: sticky; top:0; z-index:10;}
-    h1 { margin: 0; font-size: 20px; }
-    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    .grid { display: grid; gap: 16px; }
-    .g2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
-    .g3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
-    .g4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
-    .card { background: var(--panel); border:1px solid #1e2430; border-radius: 14px; padding: 16px; }
-    .kpi { display:flex; flex-direction:column; gap:8px; }
-    .kpi .label { color: var(--muted); font-size:12px; }
-    .kpi .value { font-size: 22px; font-weight: 700; }
-    .controls { display: grid; gap: 12px; grid-template-columns: repeat(5,minmax(0,1fr)); }
-    select, input[type="number"] {
-      width:100%; padding:10px 12px; background:#0e1320; color:var(--text); border:1px solid #242a36; border-radius:10px; outline:none;
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  // ===== PATHS (relative to docs/) =====
+  const PATH_SCORES = "data/derived/provider_scores_latest.csv";
+  const PATH_ROI    = "data/derived/roi_comparison.csv";
+  const PATH_MARKET = "data/derived/market_index.csv";
+  const PATH_CC     = "data/derived/compute_calculator_snapshot.csv";
+
+  // ===== small helpers =====
+  const $ = sel => document.querySelector(sel);
+  const fmt = (n, d=2) => (n==null || isNaN(+n)) ? "—" : (+n).toLocaleString(undefined, {minimumFractionDigits:d, maximumFractionDigits:d});
+  const fmtMoney = (n, d=2, pfx="$") => (n==null || isNaN(+n)) ? "—" : pfx + fmt(n,d);
+  const toHours = s => {
+    if(!s) return NaN;
+    s = String(s).toLowerCase();
+    const m = s.match(/^(\d+(?:\.\d+)?)\s*([a-z]+)s?$/);
+    if(!m) return NaN;
+    const q = parseFloat(m[1]); const u = m[2];
+    const mult = {h:1, hr:1, hour:1, d:24, day:24, w:168, wk:168, week:168, mo:720, month:720}[u] ?? NaN;
+    return q*mult;
+  };
+  const numify = v => {
+    if (v===null || v===undefined) return NaN;
+    const s = String(v).trim();
+    if (!s) return NaN;
+    const x = parseFloat(s.replace(/[^\d.\-]/g, ""));
+    return Number.isFinite(x) ? x : NaN;
+  };
+
+  async function fetchText(url){
+    const res = await fetch(url, {cache:"no-store"});
+    return { ok: res.ok, status: res.status, len: +(res.headers.get("content-length")||0), text: await res.text() };
+  }
+  async function loadCSV(url){
+    const fx = await fetchText(url);
+    if (!fx.ok) {
+      console.error("fetch failed", url, fx.status, fx.len);
+      return { rows: [], meta: { url, ok:false, status:fx.status, rawBytes:fx.len } };
     }
-    button { padding:10px 14px; border:1px solid #2a3345; background:#121827; color:var(--text); border-radius:10px; cursor:pointer; }
-    button:hover { border-color:#3b4660; }
-    table { width:100%; border-collapse: collapse; }
-    th, td { padding:10px; text-align:left; border-bottom:1px solid #1f2633; }
-    th { color: var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
-    .tag { font-size:12px; color:#cbd5e1; padding:2px 8px; border:1px solid #2a3345; border-radius: 999px; }
-    .row { display:flex; gap:16px; align-items: center; }
-    .small { font-size:12px; color:var(--muted);}
-    .section-title { margin: 6px 0 10px; font-size:16px; font-weight:700; }
-    canvas { background: #0e1320; border-radius: 12px; padding: 8px; }
-    .error { background:#2a1120; border:1px solid #532338; color:#ffd6e0; padding:8px 12px; border-radius:10px; }
-    @media (max-width: 900px) {
-      .controls { grid-template-columns: repeat(2,minmax(0,1fr)); }
-      .g4 { grid-template-columns: repeat(2,minmax(0,1fr)); }
-      .g3 { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    const parsed = Papa.parse(fx.text, { header:true, dynamicTyping:false, skipEmptyLines:true });
+    if (parsed.errors?.length) console.warn("Papa errors", url, parsed.errors.slice(0,3));
+    return { rows: parsed.data || [], meta: { url, ok:true, status:200, rawBytes:fx.text.length } };
+  }
+
+  const uniq = arr => [...new Set(arr.filter(v => v!=="" && v!==null && v!==undefined))].sort((a,b)=>String(a).localeCompare(String(b)));
+
+  // ===== global state =====
+  let RAW_SCORES = [];
+  let SCORES = [];   // usable
+  let ROI = [];
+  let MKT = [];
+  let CC  = [];
+  let predChart;
+
+  // ===== normalize (tolerant to header quirks) =====
+  function normalizeScoreRow(r){
+    // Trim keys that may have BOM or spaces
+    if ("\ufeffprovider" in r && !("provider" in r)) r.provider = r["\ufeffprovider"];
+
+    // price
+    const price =
+      r.effective_price_usd_per_gpu_hr ??
+      r.usd_per_gpu_hr ??
+      r.price_hourly_usd ??
+      r.price_reserved_usd ??
+      r.price_hourly_usd_instance;
+    r.effective_price_usd_per_gpu_hr = numify(price);
+
+    // basic fields
+    r.provider   = (r.provider ?? "").toString().trim();
+    r.region     = (r.region ?? "Global").toString().trim();
+    r.gpu_model  = (r.gpu_model ?? "").toString().trim();
+    r.type       = (r.type ?? "").toString().trim();
+    r.duration   = (r.duration ?? "").toString().trim();
+    r.gpu_count  = r.gpu_count==="" ? null : r.gpu_count;
+
+    // time
+    r.when = (r.timestamp || r.asof_utc || "").toString();
+
+    // score
+    r.priceiq_score = numify(r.priceiq_score) || 0;
+
+    return r;
+  }
+
+  // ===== bootstrap =====
+  (async function init(){
+    const [scoresLd, roiLd, mktLd, ccLd] = await Promise.all([
+      loadCSV(PATH_SCORES),
+      loadCSV(PATH_ROI),
+      loadCSV(PATH_MARKET),
+      loadCSV(PATH_CC),
+    ]);
+
+    RAW_SCORES = scoresLd.rows;
+    const rawCount = RAW_SCORES.length;
+    const priceKey = RAW_SCORES.length ? Object.keys(RAW_SCORES[0]).find(k => k.toLowerCase().includes("gpu_hr")) : "(none)";
+    console.log("scores meta:", scoresLd.meta, "first keys:", RAW_SCORES[0] ? Object.keys(RAW_SCORES[0]) : []);
+
+    // normalize, but DO NOT drop rows yet; only drop rows with NaN price when rendering
+    SCORES = RAW_SCORES.map(normalizeScoreRow);
+    ROI = roiLd.rows || [];
+    MKT = mktLd.rows || [];
+    CC  = ccLd.rows || [];
+
+    // Last updated
+    const ts = (SCORES.find(r=>r.when)?.when) || (ROI[0]?.timestamp) || "";
+    $("#loadedBadge").textContent = ts ? ("loaded") : "loaded";
+    $("#rowBadge").textContent = `rows: ${rawCount}`;
+    if (!rawCount) {
+      const eb = $("#errorBanner"); eb.style.display="block";
+      eb.textContent = `No rows loaded from provider_scores_latest.csv (status ${scoresLd.meta.status}, bytes ${scoresLd.meta.rawBytes}).`;
     }
-  </style>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-</head>
-<body>
-  <header>
-    <div class="wrap row">
-      <h1>Price-IQ • GPU Market Dashboard</h1>
-      <span class="tag" id="loadedBadge">loading…</span>
-      <span class="tag" id="rowBadge" style="margin-left:8px">rows: 0</span>
-    </div>
-  </header>
 
-  <div class="wrap grid" style="gap:24px">
+    // selectors
+    fillSelect("#fGpu", uniq(SCORES.map(r=>r.gpu_model)));
+    fillSelect("#fRegion", ["All", ...uniq(SCORES.map(r=>r.region))], "All");
+    fillSelect("#fType", ["All", ...uniq(SCORES.map(r=>r.type))], "All");
+    fillSelect("#fDur", ["All", ...uniq(SCORES.map(r=>r.duration))], "All");
+    fillSelect("#fCount", ["All", ...uniq(SCORES.map(r=>r.gpu_count))], "All");
 
-    <div id="errorBanner" class="error" style="display:none"></div>
+    fillSelect("#pGpu", uniq(SCORES.map(r=>r.gpu_model)));
+    fillSelect("#pRegion", ["US","EU","Global", ...uniq(SCORES.map(r=>r.region)).filter(x=>!["US","EU","Global"].includes(x))], "US");
+    fillSelect("#rcProv", ["", ...uniq(SCORES.map(r=>r.provider))], "");
 
-    <!-- Filters -->
-    <section class="card">
-      <div class="section-title">Filters</div>
-      <div class="controls" style="margin-top:8px">
-        <div>
-          <div class="small">GPU</div>
-          <select id="fGpu"></select>
-        </div>
-        <div>
-          <div class="small">Region</div>
-          <select id="fRegion"></select>
-        </div>
-        <div>
-          <div class="small">Type</div>
-          <select id="fType"></select>
-        </div>
-        <div>
-          <div class="small">Duration</div>
-          <select id="fDur"></select>
-        </div>
-        <div>
-          <div class="small">GPU Count</div>
-          <select id="fCount"></select>
-        </div>
-      </div>
-      <div style="margin-top:10px">
-        <button id="clearFilters">Clear</button>
-      </div>
-    </section>
+    ["#fGpu","#fRegion","#fType","#fDur","#fCount"].forEach(id => $(id).addEventListener("change", draw));
+    $("#clearFilters").addEventListener("click", ()=>{ ["#fRegion","#fType","#fDur","#fCount"].forEach(id=>$(id).value="All"); draw(); });
+    ["#pGpu","#pRegion"].forEach(id=>$(id).addEventListener("change", drawPrediction));
+    $("#rcCalc").addEventListener("click", calcROI);
 
-    <!-- KPIs -->
-    <section class="grid g4">
-      <div class="card kpi">
-        <div class="label">Cheapest / GPU-hr</div>
-        <div class="value" id="kpiMin">—</div>
-      </div>
-      <div class="card kpi">
-        <div class="label">Median / GPU-hr</div>
-        <div class="value" id="kpiMed">—</div>
-      </div>
-      <div class="card kpi">
-        <div class="label">Providers covered</div>
-        <div class="value" id="kpiProv">—</div>
-      </div>
-      <div class="card kpi">
-        <div class="label">Entries</div>
-        <div class="value" id="kpiRows">—</div>
-      </div>
-    </section>
+    draw();
+    drawPrediction();
+    drawROI();
+    drawComputeCalc();
+  })();
 
-    <!-- Leaderboard -->
-    <section class="card">
-      <div class="section-title">Leaderboard (Price-IQ)</div>
-      <div class="small" style="margin-bottom:8px">Sorted by $/GPU-hr then score.</div>
-      <table id="leader">
-        <thead>
-          <tr>
-            <th>Provider</th><th>Region</th><th>GPU</th><th>Type</th><th>Duration</th>
-            <th>GPU Count</th><th>$ / GPU-hr</th><th>Score</th><th>When</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </section>
+  function fillSelect(sel, items, def){
+    const el = $(sel); el.innerHTML = "";
+    for (const v of items){
+      const opt = document.createElement("option");
+      opt.value = String(v); opt.textContent = String(v);
+      if (def!=null && String(v)===String(def)) opt.selected = true;
+      el.appendChild(opt);
+    }
+    if (!el.value && el.options.length) el.selectedIndex = 0;
+  }
 
-    <!-- Price Prediction -->
-    <section class="card">
-      <div class="section-title">Price Prediction (Market Quantiles)</div>
-      <div class="row" style="gap:8px; flex-wrap:wrap">
-        <div>
-          <div class="small">GPU</div>
-          <select id="pGpu"></select>
-        </div>
-        <div>
-          <div class="small">Region</div>
-          <select id="pRegion"></select>
-        </div>
-        <div class="tag" id="pInfo">n=—, market=—</div>
-      </div>
+  // ===== Leaderboard + KPIs =====
+  function draw(){
+    let rows = [...SCORES];
+    const fGpu = $("#fGpu").value;
+    const fRegion = $("#fRegion").value;
+    const fType = $("#fType").value;
+    const fDur = $("#fDur").value;
+    const fCount = $("#fCount").value;
 
-      <div class="grid g5" style="grid-template-columns: repeat(5,minmax(0,1fr)); margin-top:12px">
-        <div class="kpi"><div class="label">p10</div><div class="value" id="qp10">—</div></div>
-        <div class="kpi"><div class="label">p25</div><div class="value" id="qp25">—</div></div>
-        <div class="kpi"><div class="label">p50</div><div class="value" id="qp50">—</div></div>
-        <div class="kpi"><div class="label">p75</div><div class="value" id="qp75">—</div></div>
-        <div class="kpi"><div class="label">p90</div><div class="value" id="qp90">—</div></div>
-      </div>
+    // require GPU, others optional
+    rows = rows.filter(r => String(r.gpu_model) === String(fGpu));
+    if (fRegion !== "All") rows = rows.filter(r => String(r.region) === fRegion);
+    if (fType !== "All") rows = rows.filter(r => String(r.type) === fType);
+    if (fDur !== "All") rows = rows.filter(r => String(r.duration) === fDur);
+    if (fCount !== "All") rows = rows.filter(r => String(r.gpu_count) === fCount);
 
-      <div style="margin-top:12px">
-        <canvas id="predChart" height="120"></canvas>
-      </div>
-    </section>
+    // Only for stats/table: keep rows with numeric price
+    const usable = rows.filter(r => Number.isFinite(+r.effective_price_usd_per_gpu_hr));
 
-    <!-- ROI (table) -->
-    <section class="card">
-      <div class="section-title">ROI (Cheapest total cost)</div>
-      <div class="small" style="margin-bottom:8px">From <code>roi_comparison.csv</code></div>
-      <table id="roiTable">
-        <thead>
-          <tr>
-            <th>GPU</th><th>Count</th><th>Duration</th><th>Best provider</th><th>Region</th>
-            <th>$ / GPU-hr</th><th>Total cost</th><th>When</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </section>
+    const prices = usable.map(r=>+r.effective_price_usd_per_gpu_hr);
+    const min = prices.length ? Math.min(...prices) : null;
+    const med = prices.length ? quantile(prices, .5) : null;
+    $("#kpiMin").textContent = fmtMoney(min);
+    $("#kpiMed").textContent = fmtMoney(med);
+    $("#kpiProv").textContent = uniq(usable.map(r=>r.provider)).length || "0";
+    $("#kpiRows").textContent = usable.length;
 
-    <!-- Compute Calculator Snapshot -->
-    <section class="card">
-      <div class="section-title">Compute Calculator (Ranges)</div>
-      <div class="small" style="margin-bottom:8px">From <code>compute_calculator_snapshot.csv</code></div>
-      <table id="ccSnap">
-        <thead>
-          <tr>
-            <th>GPU</th><th>Provider type</th><th>$ / GPU-hr</th><th>Total (term)</th>
-            <th>price_lo</th><th>price_md</th><th>price_hi</th><th>term_hours</th><th>gpu_count</th><th>used_region</th><th>n_quotes</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </section>
+    const tb = $("#leader tbody"); tb.innerHTML = "";
+    usable.sort((a,b)=>{
+      const da = (+a.effective_price_usd_per_gpu_hr) - (+b.effective_price_usd_per_gpu_hr);
+      if (Math.abs(da) > 1e-9) return da;
+      return (+b.priceiq_score) - (+a.priceiq_score);
+    });
+    for (const r of usable){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${r.provider}</td>
+        <td>${r.region}</td>
+        <td>${r.gpu_model}</td>
+        <td>${r.type}</td>
+        <td>${r.duration}</td>
+        <td>${r.gpu_count ?? ""}</td>
+        <td>${fmtMoney(r.effective_price_usd_per_gpu_hr)}</td>
+        <td>${fmt(r.priceiq_score,0)}</td>
+        <td class="small">${(r.when||"").replace("T"," ").replace("Z","")}</td>
+      `;
+      tb.appendChild(tr);
+    }
+  }
 
-  </div>
+  // ===== Prediction =====
+  function drawPrediction(){
+    const g = $("#pGpu").value;
+    const reg = $("#pRegion").value;
 
-  <script>
-    // ===== PATHS (relative to docs/) =====
-    const PATH_SCORES = "data/derived/provider_scores_latest.csv";
-    const PATH_ROI    = "data/derived/roi_comparison.csv";
-    const PATH_MARKET = "data/derived/market_index.csv";
-    const PATH_CC     = "data/derived/compute_calculator_snapshot.csv"; // optional
+    let mr = MKT.find(r => String(r.gpu_model)===g && String(r.region)===reg);
+    let used = reg;
+    if (!mr) { mr = MKT.find(r => String(r.gpu_model)===g && String(r.region).toLowerCase()==="global"); used = "Global"; }
 
-    // ===== small helpers =====
-    const $ = sel => document.querySelector(sel);
-    const fmt = (n, d=2) => (n==null || isNaN(+n)) ? "—" : (+n).toLocaleString(undefined, {minimumFractionDigits:d, maximumFractionDigits:d});
-    const fmtMoney = (n, d=2, pfx="$") => (n==null || isNaN(+n)) ? "—" : pfx + fmt(n,d);
-    const toHours = (s) => {
-      if(!s) return NaN;
-      s = String(s).toLowerCase();
-      const m = s.match(/^(\d+(?:\.\d+)?)\s*([a-z]+)s?$/);
-      if(!m) return NaN;
-      const q = parseFloat(m[1]); const u = m[2];
-      const mult = {h:1, hr:1, hour:1, d:24, day:24, w:168, wk:168, week:168, mo:720, month:720}[u] ?? NaN;
-      return q*mult;
-    };
-    async function loadCSV(path){
-      try{
-        const res = await fetch(path, {cache:'no-store'});
-        if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        const txt = await res.text();
-        const parsed = Papa.parse(txt, {header:true, dynamicTyping:true, skipEmptyLines:true});
-        if (parsed.errors && parsed.errors.length) console.warn(path, parsed.errors.slice(0,3));
-        return parsed.data || [];
-      }catch(e){
-        console.error("loadCSV failed:", path, e);
-        return [];
+    if (!mr){
+      $("#pInfo").textContent = "n=0, market=none";
+      ["#qp10","#qp25","#qp50","#qp75","#qp90"].forEach(id=>$(id).textContent="—");
+      renderPredChart([]);
+      return;
+    }
+
+    $("#pInfo").textContent = `n=${mr.market_count ?? "?"}, market=${used}`;
+    $("#qp10").textContent = fmtMoney(numify(mr.market_p10));
+    $("#qp25").textContent = fmtMoney(numify(mr.market_p25));
+    $("#qp50").textContent = fmtMoney(numify(mr.market_median));
+    $("#qp75").textContent = fmtMoney(numify(mr.market_p75));
+    $("#qp90").textContent = fmtMoney(numify(mr.market_p90));
+
+    const pts = SCORES
+      .filter(r => String(r.gpu_model)===g && (String(r.region)===used || (used==="Global" && String(r.region).toLowerCase()==="global")))
+      .map(r=>numify(r.effective_price_usd_per_gpu_hr)).filter(Number.isFinite);
+
+    renderPredChart(pts);
+  }
+
+  function renderPredChart(values){
+    const ctx = $("#predChart").getContext("2d");
+    const hist = makeHistogram(values, 24);
+    if (predChart) predChart.destroy();
+    predChart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: hist.x.map(x=>fmt(x,2)), datasets: [{ label:"Normalized Price Distribution", data: hist.y, borderWidth:2, tension:.3, pointRadius:0 }] },
+      options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ color:"#1f2633" } }, y:{ grid:{ color:"#1f2633" } } } }
+    });
+  }
+
+  // ===== ROI table =====
+  function drawROI(){
+    const tb = $("#roiTable tbody"); tb.innerHTML="";
+    for (const r of ROI){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${r.gpu_model}</td>
+        <td>${r.gpu_count}</td>
+        <td>${r.duration}</td>
+        <td>${r.best_provider}</td>
+        <td>${r.best_region}</td>
+        <td>${fmtMoney(r.price_per_gpu_hr)}</td>
+        <td>${fmtMoney(r.total_cost_usd,2)}</td>
+        <td class="small">${(r.timestamp||"").replace("T"," ").replace("Z","")}</td>`;
+      tb.appendChild(tr);
+    }
+  }
+
+  // ===== ROI calculator =====
+  function calcROI(){
+    const gpu = $("#rcGpu").value;
+    const region = $("#rcRegion").value;
+    const count = +$("#rcCount").value;
+    const dur = $("#rcDur").value;
+    const util = Math.max(1, Math.min(100, +$("#rcUtil").value)) / 100.0;
+    const provider = $("#rcProv").value || null;
+    const useP50 = $("#rcUseP50").checked;
+    const hours = toHours(dur) || 0;
+
+    let pool = SCORES.filter(r => String(r.gpu_model)===gpu && String(r.type).toLowerCase().includes("on-demand"));
+    if (region) pool = pool.filter(r => String(r.region)===region || String(r.region).toLowerCase()==="global");
+    if (provider) pool = pool.filter(r => String(r.provider)===provider);
+
+    const lines = [];
+    if (useP50){
+      let mr = MKT.find(r => String(r.gpu_model)===gpu && String(r.region)===region) ||
+               MKT.find(r => String(r.gpu_model)===gpu && String(r.region).toLowerCase()==="global");
+      if (mr && Number.isFinite(numify(mr.market_median))){
+        const price = numify(mr.market_median);
+        lines.push({provider:"Market P50", region:(mr.region||region), price, total: price*count*hours*util, source:"market_index.csv"});
       }
     }
-    const uniq = arr => [...new Set(arr.filter(v => v!=="" && v!==null && v!==undefined))].sort((a,b)=>String(a).localeCompare(String(b)));
-
-    // ===== global state =====
-    let SCORES = [];   // normalized rows for leaderboard/KPIs
-    let ROI = [];      // roi table
-    let MKT = [];      // market quantiles
-    let CC  = [];      // compute calc snapshot (optional)
-    let predChart;
-
-    // ===== normalize rows (handles aliases) =====
-    function normalizeScoreRow(r){
-      // price column
-      if (r.effective_price_usd_per_gpu_hr == null) {
-        // accept common aliases if generator changes
-        const cand = r.usd_per_gpu_hr ?? r.price_hourly_usd ?? r.price_reserved_usd;
-        r.effective_price_usd_per_gpu_hr = cand != null ? +cand : null;
-      } else {
-        r.effective_price_usd_per_gpu_hr = +r.effective_price_usd_per_gpu_hr;
-      }
-      // timestamp/asof
-      r.when = r.timestamp || r.asof_utc || "";
-      // numbery bits
-      r.gpu_count = (r.gpu_count==="" ? null : r.gpu_count);
-      r.priceiq_score = +r.priceiq_score || 0;
-      r.provider = r.provider || "";
-      r.region = r.region || "Global";
-      r.gpu_model = r.gpu_model || "";
-      r.type = r.type || "";
-      r.duration = r.duration || "";
-      return r;
+    if (pool.length){
+      const best = [...pool].sort((a,b)=> numify(a.effective_price_usd_per_gpu_hr)-numify(b.effective_price_usd_per_gpu_hr))[0];
+      const price = numify(best.effective_price_usd_per_gpu_hr);
+      if (Number.isFinite(price)) lines.push({provider:best.provider, region:best.region, price, total: price*count*hours*util, source:"provider_scores_latest.csv"});
     }
 
-    // ===== bootstrap =====
-    (async function init(){
-      const [scoresRaw, roiRaw, mktRaw, ccRaw] = await Promise.all([
-        loadCSV(PATH_SCORES),
-        loadCSV(PATH_ROI),
-        loadCSV(PATH_MARKET),
-        loadCSV(PATH_CC),
-      ]);
-
-      SCORES = scoresRaw.map(normalizeScoreRow).filter(r => Number.isFinite(+r.effective_price_usd_per_gpu_hr));
-      ROI = roiRaw || [];
-      MKT = mktRaw || [];
-      CC  = ccRaw || [];
-
-      $("#loadedBadge").textContent = "loaded";
-      $("#rowBadge").textContent = `rows: ${SCORES.length}`;
-
-      if (!SCORES.length){
-        const eb = $("#errorBanner");
-        eb.style.display = "block";
-        eb.textContent = "No rows loaded from provider_scores_latest.csv. Check path (docs/data/derived) and CORS in browser console.";
-      }
-
-      // Populate selectors (keep “All” defaults except GPU which must be chosen)
-      fillSelect("#fGpu", uniq(SCORES.map(r=>r.gpu_model)));
-      fillSelect("#fRegion", ["All", ...uniq(SCORES.map(r=>r.region))], "All");
-      fillSelect("#fType", ["All", ...uniq(SCORES.map(r=>r.type))], "All");
-      fillSelect("#fDur", ["All", ...uniq(SCORES.map(r=>r.duration))], "All");
-      fillSelect("#fCount", ["All", ...uniq(SCORES.map(r=>r.gpu_count))], "All");
-
-      // Prediction controls
-      fillSelect("#pGpu", uniq(SCORES.map(r=>r.gpu_model)));
-      fillSelect("#pRegion", ["US","EU","Global", ...uniq(SCORES.map(r=>r.region)).filter(x=>!["US","EU","Global"].includes(x))], "US");
-
-      // ROI calc providers
-      fillSelect("#rcProv", ["", ...uniq(SCORES.map(r=>r.provider))], "");
-
-      // events
-      ["#fGpu","#fRegion","#fType","#fDur","#fCount"].forEach(id => $(id).addEventListener("change", draw));
-      $("#clearFilters").addEventListener("click", ()=>{ ["#fRegion","#fType","#fDur","#fCount"].forEach(id=>$(id).value="All"); draw(); });
-      ["#pGpu","#pRegion"].forEach(id=>$(id).addEventListener("change", drawPrediction));
-      $("#rcCalc").addEventListener("click", calcROI);
-
-      // first render
-      draw();
-      drawPrediction();
-      drawROI();
-      drawComputeCalc();
-    })();
-
-    function fillSelect(sel, items, def){
-      const el = $(sel); el.innerHTML = "";
-      for (const v of items){
-        const opt = document.createElement("option");
-        opt.value = String(v); opt.textContent = String(v);
-        if (def!=null && String(v)===String(def)) opt.selected = true;
-        el.appendChild(opt);
-      }
-      // if nothing selected and there is at least 1 option, select first
-      if (!el.value && el.options.length) el.selectedIndex = 0;
+    const tb = $("#rcOut tbody"); tb.innerHTML="";
+    for (const r of lines){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${r.provider}</td><td>${r.region}</td><td>${fmtMoney(r.price)}</td><td>${fmtMoney(r.total)}</td><td>${r.source}</td>`;
+      tb.appendChild(tr);
     }
+  }
 
-    // ===== Leaderboard + KPIs =====
-    function draw(){
-      let rows = [...SCORES];
-      const fGpu = $("#fGpu").value;
-      const fRegion = $("#fRegion").value;
-      const fType = $("#fType").value;
-      const fDur = $("#fDur").value;
-      const fCount = $("#fCount").value;
-
-      // GPU is required to avoid mixing H100/H200 KPIs
-      rows = rows.filter(r => String(r.gpu_model) === String(fGpu));
-      if (fRegion !== "All") rows = rows.filter(r => String(r.region) === fRegion);
-      if (fType !== "All") rows = rows.filter(r => String(r.type) === fType);
-      if (fDur !== "All") rows = rows.filter(r => String(r.duration) === fDur);
-      if (fCount !== "All") rows = rows.filter(r => String(r.gpu_count) === fCount);
-
-      const prices = rows.map(r=>+r.effective_price_usd_per_gpu_hr).filter(Number.isFinite);
-      const min = prices.length ? Math.min(...prices) : null;
-      const med = prices.length ? quantile(prices, .5) : null;
-      $("#kpiMin").textContent = fmtMoney(min);
-      $("#kpiMed").textContent = fmtMoney(med);
-      $("#kpiProv").textContent = uniq(rows.map(r=>r.provider)).length || "0";
-      $("#kpiRows").textContent = rows.length;
-
-      const tb = $("#leader tbody"); tb.innerHTML = "";
-      rows.sort((a,b)=>{
-        const da = (+a.effective_price_usd_per_gpu_hr) - (+b.effective_price_usd_per_gpu_hr);
-        if (Math.abs(da) > 1e-9) return da;
-        return (+b.priceiq_score) - (+a.priceiq_score);
-      });
-      for (const r of rows){
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${r.provider}</td>
-          <td>${r.region}</td>
-          <td>${r.gpu_model}</td>
-          <td>${r.type}</td>
-          <td>${r.duration}</td>
-          <td>${r.gpu_count ?? ""}</td>
-          <td>${fmtMoney(r.effective_price_usd_per_gpu_hr)}</td>
-          <td>${fmt(r.priceiq_score,0)}</td>
-          <td class="small">${(r.when||"").replace("T"," ").replace("Z","")}</td>
-        `;
-        tb.appendChild(tr);
-      }
+  // ===== Compute calc =====
+  function drawComputeCalc(){
+    const tb = $("#ccSnap tbody"); tb.innerHTML = "";
+    if (!CC.length) return;
+    for (const r of CC){
+      const totalLo = (r.term_hours && r.price_lo) ? r.term_hours * r.price_lo : null;
+      const totalHi = (r.term_hours && r.price_hi) ? r.term_hours * r.price_hi : null;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${r.gpu_model||""}</td>
+        <td>${r.provider_type||""}</td>
+        <td>${r["$/GPU-hr"] || `${fmtMoney(r.price_lo)}–${fmtMoney(r.price_hi)}`}</td>
+        <td>${r.TOTAL || `${fmtMoney(totalLo)}–${fmtMoney(totalHi)}`}</td>
+        <td>${fmt(r.price_lo)}</td>
+        <td>${fmt(r.price_md)}</td>
+        <td>${fmt(r.price_hi)}</td>
+        <td>${r.term_hours}</td>
+        <td>${r.gpu_count}</td>
+        <td>${r.used_region||""}</td>
+        <td>${r.n_quotes||""}</td>
+      `;
+      tb.appendChild(tr);
     }
+  }
 
-    // ===== Prediction (from market_index + histogram of scores) =====
-    function drawPrediction(){
-      const g = $("#pGpu").value;
-      const reg = $("#pRegion").value;
-
-      let mr = MKT.find(r => String(r.gpu_model)===g && String(r.region)===reg);
-      let used = reg;
-      if (!mr) { mr = MKT.find(r => String(r.gpu_model)===g && String(r.region).toLowerCase()==="global"); used = "Global"; }
-
-      if (!mr){
-        $("#pInfo").textContent = "n=0, market=none";
-        ["#qp10","#qp25","#qp50","#qp75","#qp90"].forEach(id=>$(id).textContent="—");
-        renderPredChart([]);
-        return;
-      }
-
-      $("#pInfo").textContent = `n=${mr.market_count ?? "?"}, market=${used}`;
-      $("#qp10").textContent = fmtMoney(mr.market_p10);
-      $("#qp25").textContent = fmtMoney(mr.market_p25);
-      $("#qp50").textContent = fmtMoney(mr.market_median);
-      $("#qp75").textContent = fmtMoney(mr.market_p75);
-      $("#qp90").textContent = fmtMoney(mr.market_p90);
-
-      const pts = SCORES
-        .filter(r => String(r.gpu_model)===g && (String(r.region)===used || (used==="Global" && String(r.region).toLowerCase()==="global")))
-        .map(r=>+r.effective_price_usd_per_gpu_hr).filter(Number.isFinite);
-
-      renderPredChart(pts);
+  // ===== stats =====
+  function quantile(arr, q){
+    if (!arr.length) return NaN;
+    const a = [...arr].sort((x,y)=>x-y);
+    const p = (a.length-1)*q;
+    const lo = Math.floor(p), hi = Math.ceil(p);
+    return (a[lo] + a[hi]) / 2;
+  }
+  function makeHistogram(values, bins=24){
+    if (!values.length) return {x:[], y:[]};
+    const min = Math.min(...values), max = Math.max(...values);
+    const step = (max-min)/bins || 1;
+    const edges = Array.from({length:bins+1}, (_,i)=>min + i*step);
+    const counts = new Array(bins).fill(0);
+    for (const v of values){
+      let idx = Math.floor((v-min)/step);
+      if (idx >= bins) idx = bins-1;
+      if (idx >=0) counts[idx]++;
     }
+    const total = counts.reduce((a,b)=>a+b,0)||1;
+    return { x: edges.slice(0,-1), y: counts.map(c=>c/total) };
+  }
+</script>
 
-    function renderPredChart(values){
-      const ctx = $("#predChart").getContext("2d");
-      const hist = makeHistogram(values, 24);
-      if (predChart) predChart.destroy();
-      predChart = new Chart(ctx, {
-        type: 'line',
-        data: { labels: hist.x.map(x=>fmt(x,2)), datasets: [{ label:"Normalized Price Distribution", data: hist.y, borderWidth:2, tension:.3, pointRadius:0 }] },
-        options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ color:"#1f2633" } }, y:{ grid:{ color:"#1f2633" } } } }
-      });
-    }
-
-    // ===== ROI table =====
-    function drawROI(){
-      const tb = $("#roiTable tbody"); tb.innerHTML="";
-      for (const r of ROI){
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${r.gpu_model}</td>
-          <td>${r.gpu_count}</td>
-          <td>${r.duration}</td>
-          <td>${r.best_provider}</td>
-          <td>${r.best_region}</td>
-          <td>${fmtMoney(r.price_per_gpu_hr)}</td>
-          <td>${fmtMoney(r.total_cost_usd,2)}</td>
-          <td class="small">${(r.timestamp||"").replace("T"," ").replace("Z","")}</td>`;
-        tb.appendChild(tr);
-      }
-    }
-
-    // ===== ROI calculator =====
-    function calcROI(){
-      const gpu = $("#rcGpu").value;
-      const region = $("#rcRegion").value;
-      const count = +$("#rcCount").value;
-      const dur = $("#rcDur").value;
-      const util = Math.max(1, Math.min(100, +$("#rcUtil").value)) / 100.0;
-      const provider = $("#rcProv").value || null;
-      const useP50 = $("#rcUseP50").checked;
-      const hours = toHours(dur) || 0;
-
-      let pool = SCORES.filter(r => String(r.gpu_model)===gpu && String(r.type).toLowerCase().includes("on-demand"));
-      if (region) pool = pool.filter(r => String(r.region)===region || String(r.region).toLowerCase()==="global");
-      if (provider) pool = pool.filter(r => String(r.provider)===provider);
-
-      const lines = [];
-      if (useP50){
-        let mr = MKT.find(r => String(r.gpu_model)===gpu && String(r.region)===region) ||
-                 MKT.find(r => String(r.gpu_model)===gpu && String(r.region).toLowerCase()==="global");
-        if (mr && Number.isFinite(+mr.market_median)){
-          const price = +mr.market_median;
-          lines.push({provider:"Market P50", region:(mr.region||region), price, total: price*count*hours*util, source:"market_index.csv"});
-        }
-      }
-      if (pool.length){
-        const best = [...pool].sort((a,b)=> (+a.effective_price_usd_per_gpu_hr)-(+b.effective_price_usd_per_gpu_hr))[0];
-        const price = +best.effective_price_usd_per_gpu_hr;
-        lines.push({provider:best.provider, region:best.region, price, total: price*count*hours*util, source:"provider_scores_latest.csv"});
-      }
-
-      const tb = $("#rcOut tbody"); tb.innerHTML="";
-      for (const r of lines){
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td>${r.provider}</td><td>${r.region}</td><td>${fmtMoney(r.price)}</td><td>${fmtMoney(r.total)}</td><td>${r.source}</td>`;
-        tb.appendChild(tr);
-      }
-    }
-
-    // ===== Compute calculator snapshot (optional) =====
-    function drawComputeCalc(){
-      const tb = $("#ccSnap tbody"); tb.innerHTML = "";
-      if (!CC.length) return;
-      for (const r of CC){
-        const tr = document.createElement("tr");
-        const totalLo = (r.term_hours && r.price_lo) ? r.term_hours * r.price_lo : null;
-        const totalHi = (r.term_hours && r.price_hi) ? r.term_hours * r.price_hi : null;
-        tr.innerHTML = `
-          <td>${r.gpu_model||""}</td>
-          <td>${r.provider_type||""}</td>
-          <td>${r["$/GPU-hr"] || `${fmtMoney(r.price_lo)}–${fmtMoney(r.price_hi)}`}</td>
-          <td>${r.TOTAL || `${fmtMoney(totalLo)}–${fmtMoney(totalHi)}`}</td>
-          <td>${fmt(r.price_lo)}</td>
-          <td>${fmt(r.price_md)}</td>
-          <td>${fmt(r.price_hi)}</td>
-          <td>${r.term_hours}</td>
-          <td>${r.gpu_count}</td>
-          <td>${r.used_region||""}</td>
-          <td>${r.n_quotes||""}</td>
-        `;
-        tb.appendChild(tr);
-      }
-    }
-
-    // ===== stats helpers =====
-    function quantile(arr, q){
-      if (!arr.length) return NaN;
-      const a = [...arr].sort((x,y)=>x-y);
-      const p = (a.length-1)*q;
-      const lo = Math.floor(p), hi = Math.ceil(p);
-      return (a[lo] + a[hi]) / 2;
-    }
-    function makeHistogram(values, bins=24){
-      if (!values.length) return {x:[], y:[]};
-      const min = Math.min(...values), max = Math.max(...values);
-      const step = (max-min)/bins || 1;
-      const edges = Array.from({length:bins+1}, (_,i)=>min + i*step);
-      const counts = new Array(bins).fill(0);
-      for (const v of values){
-        let idx = Math.floor((v-min)/step);
-        if (idx >= bins) idx = bins-1;
-        if (idx >=0) counts[idx]++;
-      }
-      const total = counts.reduce((a,b)=>a+b,0)||1;
-      return { x: edges.slice(0,-1), y: counts.map(c=>c/total) };
-    }
-  </script>
-</body>
-</html>
 

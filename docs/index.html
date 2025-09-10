@@ -1,345 +1,121 @@
-<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script>
-  // ===== PATHS (relative to docs/) =====
-  const PATH_SCORES = "data/derived/provider_scores_latest.csv";
-  const PATH_ROI    = "data/derived/roi_comparison.csv";
-  const PATH_MARKET = "data/derived/market_index.csv";
-  const PATH_CC     = "data/derived/compute_calculator_snapshot.csv";
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Price-IQ • GPU Market Dashboard (baseline)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    :root { --bg:#0f1115; --panel:#151923; --muted:#9aa4b2; --text:#e8eef7; }
+    *{box-sizing:border-box} body{margin:0;font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial;color:var(--text);background:var(--bg)}
+    header{padding:16px 20px;border-bottom:1px solid #1e2430;background:#0f131c;position:sticky;top:0}
+    .wrap{max-width:1000px;margin:0 auto;padding:20px}
+    .tag{display:inline-block;padding:2px 8px;border:1px solid #2a3345;border-radius:999px;color:#cbd5e1;font-size:12px}
+    .card{background:var(--panel);border:1px solid #1e2430;border-radius:12px;padding:16px;margin-top:16px}
+    .error{background:#2a1120;border:1px solid #532338;color:#ffd6e0;border-radius:10px;padding:10px;display:none}
+    code,pre{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px}
+    table{width:100%;border-collapse:collapse;margin-top:10px} th,td{padding:8px;border-bottom:1px solid #1f2633;text-align:left}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1 style="margin:0">Price-IQ • GPU Market Dashboard</h1>
+      <span class="tag" id="badge">loading…</span>
+      <span class="tag" id="rows" style="margin-left:8px">rows: —</span>
+    </div>
+  </header>
 
-  // ===== small helpers =====
-  const $ = sel => document.querySelector(sel);
-  const fmt = (n, d=2) => (n==null || isNaN(+n)) ? "—" : (+n).toLocaleString(undefined, {minimumFractionDigits:d, maximumFractionDigits:d});
-  const fmtMoney = (n, d=2, pfx="$") => (n==null || isNaN(+n)) ? "—" : pfx + fmt(n,d);
-  const toHours = s => {
-    if(!s) return NaN;
-    s = String(s).toLowerCase();
-    const m = s.match(/^(\d+(?:\.\d+)?)\s*([a-z]+)s?$/);
-    if(!m) return NaN;
-    const q = parseFloat(m[1]); const u = m[2];
-    const mult = {h:1, hr:1, hour:1, d:24, day:24, w:168, wk:168, week:168, mo:720, month:720}[u] ?? NaN;
-    return q*mult;
-  };
-  const numify = v => {
-    if (v===null || v===undefined) return NaN;
-    const s = String(v).trim();
-    if (!s) return NaN;
-    const x = parseFloat(s.replace(/[^\d.\-]/g, ""));
-    return Number.isFinite(x) ? x : NaN;
-  };
+  <div class="wrap">
+    <div id="err" class="error"></div>
 
-  async function fetchText(url){
-    const res = await fetch(url, {cache:"no-store"});
-    return { ok: res.ok, status: res.status, len: +(res.headers.get("content-length")||0), text: await res.text() };
-  }
-  async function loadCSV(url){
-    const fx = await fetchText(url);
-    if (!fx.ok) {
-      console.error("fetch failed", url, fx.status, fx.len);
-      return { rows: [], meta: { url, ok:false, status:fx.status, rawBytes:fx.len } };
-    }
-    const parsed = Papa.parse(fx.text, { header:true, dynamicTyping:false, skipEmptyLines:true });
-    if (parsed.errors?.length) console.warn("Papa errors", url, parsed.errors.slice(0,3));
-    return { rows: parsed.data || [], meta: { url, ok:true, status:200, rawBytes:fx.text.length } };
-  }
+    <div class="card">
+      <div><strong>Fetch status</strong></div>
+      <div id="status">—</div>
+    </div>
 
-  const uniq = arr => [...new Set(arr.filter(v => v!=="" && v!==null && v!==undefined))].sort((a,b)=>String(a).localeCompare(String(b)));
+    <div class="card">
+      <div><strong>First row keys</strong></div>
+      <pre id="keys">—</pre>
+    </div>
 
-  // ===== global state =====
-  let RAW_SCORES = [];
-  let SCORES = [];   // usable
-  let ROI = [];
-  let MKT = [];
-  let CC  = [];
-  let predChart;
+    <div class="card">
+      <div><strong>First 3 rows (pretty)</strong></div>
+      <pre id="preview">—</pre>
+    </div>
+  </div>
 
-  // ===== normalize (tolerant to header quirks) =====
-  function normalizeScoreRow(r){
-    // Trim keys that may have BOM or spaces
-    if ("\ufeffprovider" in r && !("provider" in r)) r.provider = r["\ufeffprovider"];
+  <script>
+  // run after DOM + Papa are loaded
+  window.addEventListener('DOMContentLoaded', async () => {
+    const PATH = "data/derived/provider_scores_latest.csv";
+    const $ = s => document.querySelector(s);
+    const showErr = (msg) => { const el = $("#err"); el.textContent = msg; el.style.display = "block"; };
 
-    // price
-    const price =
-      r.effective_price_usd_per_gpu_hr ??
-      r.usd_per_gpu_hr ??
-      r.price_hourly_usd ??
-      r.price_reserved_usd ??
-      r.price_hourly_usd_instance;
-    r.effective_price_usd_per_gpu_hr = numify(price);
-
-    // basic fields
-    r.provider   = (r.provider ?? "").toString().trim();
-    r.region     = (r.region ?? "Global").toString().trim();
-    r.gpu_model  = (r.gpu_model ?? "").toString().trim();
-    r.type       = (r.type ?? "").toString().trim();
-    r.duration   = (r.duration ?? "").toString().trim();
-    r.gpu_count  = r.gpu_count==="" ? null : r.gpu_count;
-
-    // time
-    r.when = (r.timestamp || r.asof_utc || "").toString();
-
-    // score
-    r.priceiq_score = numify(r.priceiq_score) || 0;
-
-    return r;
-  }
-
-  // ===== bootstrap =====
-  (async function init(){
-    const [scoresLd, roiLd, mktLd, ccLd] = await Promise.all([
-      loadCSV(PATH_SCORES),
-      loadCSV(PATH_ROI),
-      loadCSV(PATH_MARKET),
-      loadCSV(PATH_CC),
-    ]);
-
-    RAW_SCORES = scoresLd.rows;
-    const rawCount = RAW_SCORES.length;
-    const priceKey = RAW_SCORES.length ? Object.keys(RAW_SCORES[0]).find(k => k.toLowerCase().includes("gpu_hr")) : "(none)";
-    console.log("scores meta:", scoresLd.meta, "first keys:", RAW_SCORES[0] ? Object.keys(RAW_SCORES[0]) : []);
-
-    // normalize, but DO NOT drop rows yet; only drop rows with NaN price when rendering
-    SCORES = RAW_SCORES.map(normalizeScoreRow);
-    ROI = roiLd.rows || [];
-    MKT = mktLd.rows || [];
-    CC  = ccLd.rows || [];
-
-    // Last updated
-    const ts = (SCORES.find(r=>r.when)?.when) || (ROI[0]?.timestamp) || "";
-    $("#loadedBadge").textContent = ts ? ("loaded") : "loaded";
-    $("#rowBadge").textContent = `rows: ${rawCount}`;
-    if (!rawCount) {
-      const eb = $("#errorBanner"); eb.style.display="block";
-      eb.textContent = `No rows loaded from provider_scores_latest.csv (status ${scoresLd.meta.status}, bytes ${scoresLd.meta.rawBytes}).`;
-    }
-
-    // selectors
-    fillSelect("#fGpu", uniq(SCORES.map(r=>r.gpu_model)));
-    fillSelect("#fRegion", ["All", ...uniq(SCORES.map(r=>r.region))], "All");
-    fillSelect("#fType", ["All", ...uniq(SCORES.map(r=>r.type))], "All");
-    fillSelect("#fDur", ["All", ...uniq(SCORES.map(r=>r.duration))], "All");
-    fillSelect("#fCount", ["All", ...uniq(SCORES.map(r=>r.gpu_count))], "All");
-
-    fillSelect("#pGpu", uniq(SCORES.map(r=>r.gpu_model)));
-    fillSelect("#pRegion", ["US","EU","Global", ...uniq(SCORES.map(r=>r.region)).filter(x=>!["US","EU","Global"].includes(x))], "US");
-    fillSelect("#rcProv", ["", ...uniq(SCORES.map(r=>r.provider))], "");
-
-    ["#fGpu","#fRegion","#fType","#fDur","#fCount"].forEach(id => $(id).addEventListener("change", draw));
-    $("#clearFilters").addEventListener("click", ()=>{ ["#fRegion","#fType","#fDur","#fCount"].forEach(id=>$(id).value="All"); draw(); });
-    ["#pGpu","#pRegion"].forEach(id=>$(id).addEventListener("change", drawPrediction));
-    $("#rcCalc").addEventListener("click", calcROI);
-
-    draw();
-    drawPrediction();
-    drawROI();
-    drawComputeCalc();
-  })();
-
-  function fillSelect(sel, items, def){
-    const el = $(sel); el.innerHTML = "";
-    for (const v of items){
-      const opt = document.createElement("option");
-      opt.value = String(v); opt.textContent = String(v);
-      if (def!=null && String(v)===String(def)) opt.selected = true;
-      el.appendChild(opt);
-    }
-    if (!el.value && el.options.length) el.selectedIndex = 0;
-  }
-
-  // ===== Leaderboard + KPIs =====
-  function draw(){
-    let rows = [...SCORES];
-    const fGpu = $("#fGpu").value;
-    const fRegion = $("#fRegion").value;
-    const fType = $("#fType").value;
-    const fDur = $("#fDur").value;
-    const fCount = $("#fCount").value;
-
-    // require GPU, others optional
-    rows = rows.filter(r => String(r.gpu_model) === String(fGpu));
-    if (fRegion !== "All") rows = rows.filter(r => String(r.region) === fRegion);
-    if (fType !== "All") rows = rows.filter(r => String(r.type) === fType);
-    if (fDur !== "All") rows = rows.filter(r => String(r.duration) === fDur);
-    if (fCount !== "All") rows = rows.filter(r => String(r.gpu_count) === fCount);
-
-    // Only for stats/table: keep rows with numeric price
-    const usable = rows.filter(r => Number.isFinite(+r.effective_price_usd_per_gpu_hr));
-
-    const prices = usable.map(r=>+r.effective_price_usd_per_gpu_hr);
-    const min = prices.length ? Math.min(...prices) : null;
-    const med = prices.length ? quantile(prices, .5) : null;
-    $("#kpiMin").textContent = fmtMoney(min);
-    $("#kpiMed").textContent = fmtMoney(med);
-    $("#kpiProv").textContent = uniq(usable.map(r=>r.provider)).length || "0";
-    $("#kpiRows").textContent = usable.length;
-
-    const tb = $("#leader tbody"); tb.innerHTML = "";
-    usable.sort((a,b)=>{
-      const da = (+a.effective_price_usd_per_gpu_hr) - (+b.effective_price_usd_per_gpu_hr);
-      if (Math.abs(da) > 1e-9) return da;
-      return (+b.priceiq_score) - (+a.priceiq_score);
-    });
-    for (const r of usable){
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${r.provider}</td>
-        <td>${r.region}</td>
-        <td>${r.gpu_model}</td>
-        <td>${r.type}</td>
-        <td>${r.duration}</td>
-        <td>${r.gpu_count ?? ""}</td>
-        <td>${fmtMoney(r.effective_price_usd_per_gpu_hr)}</td>
-        <td>${fmt(r.priceiq_score,0)}</td>
-        <td class="small">${(r.when||"").replace("T"," ").replace("Z","")}</td>
-      `;
-      tb.appendChild(tr);
-    }
-  }
-
-  // ===== Prediction =====
-  function drawPrediction(){
-    const g = $("#pGpu").value;
-    const reg = $("#pRegion").value;
-
-    let mr = MKT.find(r => String(r.gpu_model)===g && String(r.region)===reg);
-    let used = reg;
-    if (!mr) { mr = MKT.find(r => String(r.gpu_model)===g && String(r.region).toLowerCase()==="global"); used = "Global"; }
-
-    if (!mr){
-      $("#pInfo").textContent = "n=0, market=none";
-      ["#qp10","#qp25","#qp50","#qp75","#qp90"].forEach(id=>$(id).textContent="—");
-      renderPredChart([]);
-      return;
-    }
-
-    $("#pInfo").textContent = `n=${mr.market_count ?? "?"}, market=${used}`;
-    $("#qp10").textContent = fmtMoney(numify(mr.market_p10));
-    $("#qp25").textContent = fmtMoney(numify(mr.market_p25));
-    $("#qp50").textContent = fmtMoney(numify(mr.market_median));
-    $("#qp75").textContent = fmtMoney(numify(mr.market_p75));
-    $("#qp90").textContent = fmtMoney(numify(mr.market_p90));
-
-    const pts = SCORES
-      .filter(r => String(r.gpu_model)===g && (String(r.region)===used || (used==="Global" && String(r.region).toLowerCase()==="global")))
-      .map(r=>numify(r.effective_price_usd_per_gpu_hr)).filter(Number.isFinite);
-
-    renderPredChart(pts);
-  }
-
-  function renderPredChart(values){
-    const ctx = $("#predChart").getContext("2d");
-    const hist = makeHistogram(values, 24);
-    if (predChart) predChart.destroy();
-    predChart = new Chart(ctx, {
-      type: 'line',
-      data: { labels: hist.x.map(x=>fmt(x,2)), datasets: [{ label:"Normalized Price Distribution", data: hist.y, borderWidth:2, tension:.3, pointRadius:0 }] },
-      options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ x:{ grid:{ color:"#1f2633" } }, y:{ grid:{ color:"#1f2633" } } } }
-    });
-  }
-
-  // ===== ROI table =====
-  function drawROI(){
-    const tb = $("#roiTable tbody"); tb.innerHTML="";
-    for (const r of ROI){
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${r.gpu_model}</td>
-        <td>${r.gpu_count}</td>
-        <td>${r.duration}</td>
-        <td>${r.best_provider}</td>
-        <td>${r.best_region}</td>
-        <td>${fmtMoney(r.price_per_gpu_hr)}</td>
-        <td>${fmtMoney(r.total_cost_usd,2)}</td>
-        <td class="small">${(r.timestamp||"").replace("T"," ").replace("Z","")}</td>`;
-      tb.appendChild(tr);
-    }
-  }
-
-  // ===== ROI calculator =====
-  function calcROI(){
-    const gpu = $("#rcGpu").value;
-    const region = $("#rcRegion").value;
-    const count = +$("#rcCount").value;
-    const dur = $("#rcDur").value;
-    const util = Math.max(1, Math.min(100, +$("#rcUtil").value)) / 100.0;
-    const provider = $("#rcProv").value || null;
-    const useP50 = $("#rcUseP50").checked;
-    const hours = toHours(dur) || 0;
-
-    let pool = SCORES.filter(r => String(r.gpu_model)===gpu && String(r.type).toLowerCase().includes("on-demand"));
-    if (region) pool = pool.filter(r => String(r.region)===region || String(r.region).toLowerCase()==="global");
-    if (provider) pool = pool.filter(r => String(r.provider)===provider);
-
-    const lines = [];
-    if (useP50){
-      let mr = MKT.find(r => String(r.gpu_model)===gpu && String(r.region)===region) ||
-               MKT.find(r => String(r.gpu_model)===gpu && String(r.region).toLowerCase()==="global");
-      if (mr && Number.isFinite(numify(mr.market_median))){
-        const price = numify(mr.market_median);
-        lines.push({provider:"Market P50", region:(mr.region||region), price, total: price*count*hours*util, source:"market_index.csv"});
+    try {
+      // sanity: confirm Papa is present
+      if (typeof Papa === "undefined") {
+        showErr("PapaParse failed to load. Check CDN or CSP.");
+        return;
       }
-    }
-    if (pool.length){
-      const best = [...pool].sort((a,b)=> numify(a.effective_price_usd_per_gpu_hr)-numify(b.effective_price_usd_per_gpu_hr))[0];
-      const price = numify(best.effective_price_usd_per_gpu_hr);
-      if (Number.isFinite(price)) lines.push({provider:best.provider, region:best.region, price, total: price*count*hours*util, source:"provider_scores_latest.csv"});
-    }
 
-    const tb = $("#rcOut tbody"); tb.innerHTML="";
-    for (const r of lines){
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${r.provider}</td><td>${r.region}</td><td>${fmtMoney(r.price)}</td><td>${fmtMoney(r.total)}</td><td>${r.source}</td>`;
-      tb.appendChild(tr);
-    }
-  }
+      // fetch with explicit diagnostics
+      const res = await fetch(PATH, {cache:'no-store'});
+      const text = await res.text();
+      $("#status").textContent = `HTTP ${res.status} • bytes=${text.length}`;
+      if (!res.ok || !text.length) {
+        showErr(`Failed to fetch CSV: HTTP ${res.status}, bytes=${text.length}. Path should be docs/${PATH}.`);
+        $("#badge").textContent = "loaded";
+        $("#rows").textContent = "rows: 0";
+        return;
+      }
 
-  // ===== Compute calc =====
-  function drawComputeCalc(){
-    const tb = $("#ccSnap tbody"); tb.innerHTML = "";
-    if (!CC.length) return;
-    for (const r of CC){
-      const totalLo = (r.term_hours && r.price_lo) ? r.term_hours * r.price_lo : null;
-      const totalHi = (r.term_hours && r.price_hi) ? r.term_hours * r.price_hi : null;
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${r.gpu_model||""}</td>
-        <td>${r.provider_type||""}</td>
-        <td>${r["$/GPU-hr"] || `${fmtMoney(r.price_lo)}–${fmtMoney(r.price_hi)}`}</td>
-        <td>${r.TOTAL || `${fmtMoney(totalLo)}–${fmtMoney(totalHi)}`}</td>
-        <td>${fmt(r.price_lo)}</td>
-        <td>${fmt(r.price_md)}</td>
-        <td>${fmt(r.price_hi)}</td>
-        <td>${r.term_hours}</td>
-        <td>${r.gpu_count}</td>
-        <td>${r.used_region||""}</td>
-        <td>${r.n_quotes||""}</td>
-      `;
-      tb.appendChild(tr);
-    }
-  }
+      // parse
+      const parsed = Papa.parse(text, {header:true, dynamicTyping:false, skipEmptyLines:true});
+      const rows = parsed.data || [];
+      $("#badge").textContent = "loaded";
+      $("#rows").textContent = `rows: ${rows.length}`;
 
-  // ===== stats =====
-  function quantile(arr, q){
-    if (!arr.length) return NaN;
-    const a = [...arr].sort((x,y)=>x-y);
-    const p = (a.length-1)*q;
-    const lo = Math.floor(p), hi = Math.ceil(p);
-    return (a[lo] + a[hi]) / 2;
-  }
-  function makeHistogram(values, bins=24){
-    if (!values.length) return {x:[], y:[]};
-    const min = Math.min(...values), max = Math.max(...values);
-    const step = (max-min)/bins || 1;
-    const edges = Array.from({length:bins+1}, (_,i)=>min + i*step);
-    const counts = new Array(bins).fill(0);
-    for (const v of values){
-      let idx = Math.floor((v-min)/step);
-      if (idx >= bins) idx = bins-1;
-      if (idx >=0) counts[idx]++;
+      if (parsed.errors && parsed.errors.length) {
+        console.warn("Papa errors:", parsed.errors.slice(0,3));
+      }
+
+      if (!rows.length) {
+        showErr("CSV parsed successfully but contains 0 data rows (only header?).");
+        return;
+      }
+
+      // Display first row keys (handles BOM)
+      const first = rows[0];
+      const keys = Object.keys(first);
+      $("#keys").textContent = JSON.stringify(keys, null, 2);
+
+      // Normalize a couple columns just to prove data is there
+      const numify = v => {
+        const s = String(v ?? "").trim();
+        const x = parseFloat(s.replace(/[^\d.\-]/g, ""));
+        return Number.isFinite(x) ? x : null;
+      };
+      const norm = rows.slice(0,3).map(r => ({
+        provider: r.provider ?? r["\ufeffprovider"] ?? "",
+        region: r.region ?? "",
+        gpu_model: r.gpu_model ?? "",
+        type: r.type ?? "",
+        duration: r.duration ?? "",
+        gpu_count: r.gpu_count ?? "",
+        price: numify(r.effective_price_usd_per_gpu_hr ?? r.usd_per_gpu_hr ?? r.price_hourly_usd),
+        timestamp: r.timestamp ?? r.asof_utc ?? ""
+      }));
+      $("#preview").textContent = JSON.stringify(norm, null, 2);
+
+    } catch (e) {
+      console.error(e);
+      showErr("Fatal JS error: " + (e && e.message ? e.message : String(e)));
     }
-    const total = counts.reduce((a,b)=>a+b,0)||1;
-    return { x: edges.slice(0,-1), y: counts.map(c=>c/total) };
-  }
-</script>
+  });
+  </script>
+</body>
+</html>
+
 
 

@@ -1,48 +1,54 @@
-name: Price-IQ data refresh
+name: build
 
 on:
-  workflow_dispatch: {}
-  schedule:
-    - cron: "0 */4 * * *"   # every 4 hours UTC
   push:
-    paths:
-      - scripts/**
-      - docs/index.html
-      - docs/assets/**
-      - requirements.txt
-      - .github/workflows/priceiq.yml
+    branches: [ main ]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */4 * * *"   # every 4 hours
+
+concurrency:
+  group: priceiq-build
+  cancel-in-progress: false
 
 permissions:
-  contents: write   # needed to commit built CSVs back
+  contents: write
 
 jobs:
-  build:
+  run:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
-          python -m pip install -U pip
-          pip install -r requirements.txt
-          # Only if you need Playwright browsers:
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install papermill jupyter ipykernel nest-asyncio aiohttp requests beautifulsoup4 lxml pandas numpy
+          pip install playwright
           python -m playwright install --with-deps chromium
+          python -m ipykernel install --user --name python3
 
       - name: Build data (scrape + aggregate)
-        env:
-          PYTHONUNBUFFERED: "1"
         run: |
-          python scripts/pipeline_build.py
+          # Execute your single notebook; outputs land under docs/data/**
+          papermill "scrape+formula.ipynb" "docs/last_run.ipynb" -k python3
+          echo "Listing derived outputs:"
+          ls -lah docs/data || true
 
       - name: Commit dashboard data (derived + history + latest)
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Price-IQ: update data (derived + history + latest)"
-          file_pattern: docs/data/**
+          file_pattern: |
+            docs/data/**
+            docs/last_run.ipynb
+

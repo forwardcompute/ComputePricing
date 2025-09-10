@@ -1,222 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Price-IQ Dashboard</title>
-
-  <!-- Inter + Tailwind -->
-  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    :root { --muted:#9fb3c8; }
-    html,body{font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#070b13;color:#e6edf3;}
-    .glass{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.08); box-shadow: 0 10px 30px rgba(0,0,0,.35); backdrop-filter: blur(8px);}
-    .kpi{border:1px solid rgba(255,255,255,.08); background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));}
-    .chip{border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.06)}
-    table thead th{ color:#9fb3c8; font-weight:600; letter-spacing:.02em; }
-    table tbody tr:hover{ background:rgba(255,255,255,.04) }
-    .badge{padding:.2rem .5rem; border-radius:.5rem; font-size:.75rem; white-space:nowrap; border:1px solid; display:inline-block}
-    .badge-on{ border-color: rgba(16,185,129,.35); color: rgba(167,243,208,.95); }
-    .badge-res{ border-color: rgba(245,158,11,.35); color: rgba(254,215,170,.95); }
-  </style>
-
-  <!-- PapaParse + dayjs -->
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
-</head>
-<body class="min-h-screen">
-  <!-- Header -->
-  <header class="relative">
-    <div class="absolute inset-0 bg-gradient-to-r from-indigo-600/30 via-fuchsia-600/20 to-emerald-500/20 blur-3xl -z-10"></div>
-    <div class="max-w-7xl mx-auto px-5 sm:px-8 py-8">
-      <div class="flex items-center gap-3">
-        <div class="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 via-sky-400 to-emerald-400"></div>
-        <div>
-          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Price-IQ</h1>
-          <p class="text-sm text-slate-300/80">Auto-generated from <span class="font-mono">data/derived/</span>.</p>
-        </div>
-        <div class="ml-auto text-sm text-slate-300/70">Last updated: <span id="lastUpdated" class="font-medium text-white">loading…</span></div>
-      </div>
-    </div>
-  </header>
-
-  <main class="max-w-7xl mx-auto px-5 sm:px-8 pb-20">
-
-    <!-- Error banner -->
-    <div id="err" class="hidden glass rounded-2xl p-4 text-sm text-rose-200 border border-rose-400/40 mb-6"></div>
-
-    <!-- Filters -->
-    <section class="glass rounded-2xl p-5 sm:p-6 mb-8">
-      <h2 class="text-xl font-semibold mb-4">Filters</h2>
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        <div>
-          <label class="block text-sm text-slate-300/80 mb-1">GPU</label>
-          <select id="fGpu" class="w-full chip rounded-xl px-3 py-2"><option value="">All</option></select>
-        </div>
-        <div>
-          <label class="block text-sm text-slate-300/80 mb-1">Region</label>
-          <select id="fRegion" class="w-full chip rounded-xl px-3 py-2"><option value="">All</option></select>
-        </div>
-        <div>
-          <label class="block text-sm text-slate-300/80 mb-1">Type</label>
-          <select id="fType" class="w-full chip rounded-xl px-3 py-2">
-            <option value="">All</option><option>On-Demand</option><option>Reserved</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-sm text-slate-300/80 mb-1">Duration</label>
-          <select id="fDuration" class="w-full chip rounded-xl px-3 py-2"><option value="">All</option></select>
-        </div>
-        <div>
-          <label class="block text-sm text-slate-300/80 mb-1">GPU Count</label>
-          <select id="fCount" class="w-full chip rounded-xl px-3 py-2"><option value="">All</option></select>
-        </div>
-        <div class="flex items-end">
-          <button id="clearBtn" class="w-full px-3 py-2 rounded-xl border border-slate-600 hover:bg-white/5">Clear</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- KPIs -->
-    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-      <div class="kpi rounded-2xl p-5">
-        <div class="text-slate-300/80 text-sm">Cheapest / GPU-hr</div>
-        <div class="text-3xl font-bold mt-1" id="kpiCheapest">–</div>
-        <div class="text-sm mt-2" id="kpiCheapestMeta"></div>
-      </div>
-      <div class="kpi rounded-2xl p-5">
-        <div class="text-slate-300/80 text-sm">Median / GPU-hr</div>
-        <div class="text-3xl font-bold mt-1" id="kpiMedian">–</div>
-        <div class="text-sm mt-2" id="kpiMedianMeta"></div>
-      </div>
-      <div class="kpi rounded-2xl p-5">
-        <div class="text-slate-300/80 text-sm">Providers covered</div>
-        <div class="text-3xl font-bold mt-1" id="kpiProviders">–</div>
-        <div class="text-sm mt-2 text-slate-300/80">Unique provider names in current filter.</div>
-      </div>
-      <div class="kpi rounded-2xl p-5">
-        <div class="text-slate-300/80 text-sm">Entries</div>
-        <div class="text-3xl font-bold mt-1" id="kpiRows">–</div>
-        <div class="text-sm mt-2 text-slate-300/80">Rows displayed in leaderboard.</div>
-      </div>
-    </section>
-
-    <!-- Leaderboard -->
-    <section class="glass rounded-2xl overflow-hidden">
-      <div class="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-white/10">
-        <h2 class="text-xl font-semibold">Leaderboard (Price-IQ)</h2>
-        <div class="text-sm text-slate-300/80">Sort:
-          <button id="sortBtn" class="ml-2 px-2 py-1 rounded-lg chip hover:bg-white/10">Price ↑</button>
-        </div>
-      </div>
-      <div class="p-0 overflow-x-auto">
-        <table class="min-w-full text-sm">
-          <thead class="bg-white/5">
-            <tr>
-              <th class="text-left px-5 py-3">Provider</th>
-              <th class="text-left px-5 py-3">Region</th>
-              <th class="text-left px-5 py-3">GPU</th>
-              <th class="text-left px-5 py-3">Type</th>
-              <th class="text-left px-5 py-3">Duration</th>
-              <th class="text-left px-5 py-3">Count</th>
-              <th class="text-right px-5 py-3">$/GPU-hr</th>
-              <th class="text-right px-5 py-3">Score</th>
-              <th class="text-left px-5 py-3">When</th>
-            </tr>
-          </thead>
-          <tbody id="lbBody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- ROI (precomputed table) -->
-    <section class="glass rounded-2xl overflow-hidden mt-8">
-      <div class="px-5 sm:px-6 py-4 border-b border-white/10 flex items-center gap-4">
-        <h2 class="text-xl font-semibold">ROI (Cheapest total cost)</h2>
-        <span class="badge badge-on">from roi_comparison.csv</span>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="min-w-full text-sm">
-          <thead class="bg-white/5" id="roiHead"></thead>
-          <tbody id="roiBody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- ROI Calculator -->
-    <section class="glass rounded-2xl p-5 sm:p-6 mt-8">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-semibold">ROI Calculator</h2>
-        <label class="inline-flex items-center gap-2 text-sm">
-          <input id="rcUsePred" type="checkbox" class="accent-indigo-500">
-          <span>Use market P50 (median) if available</span>
-        </label>
-      </div>
-
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 mb-4">
-        <div>
-          <label class="block text-sm text-slate-300/80 mb-1">GPU</label>
-          <select id="rcGpu" class="w-full chip rounded-xl px-3 py-2"></select>
-        </div>
-        <div>
-          <label class="block text-sm text-slate-300/80 mb-1">Region</label>
-          <select id="rcRegion" class="w-full chip rounded-xl px-3 py-2"></select>
-        </div>
-        <div>
-          <label class="block text-sm text-slate-300/80 mb-1">Count</label>
-          <input id="rcCount" type="number" min="1" step="1" value="8" class="w-full chip rounded-xl px-3 py-2">
-        </div>
-        <div>
-          <label class="block text-sm text-slate-300/80 mb-1">Duration</label>
-          <select id="rcDuration" class="w-full chip rounded-xl px-3 py-2">
-            <option>1 hour</option><option>1 day</option><option>1 week</option><option>1 month</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-sm text-slate-300/80 mb-1">Utilization</label>
-          <div class="flex items-center gap-2">
-            <input id="rcUtil" type="number" min="1" max="100" step="1" value="100" class="w-full chip rounded-xl px-3 py-2">
-            <span class="text-slate-300/70">%</span>
-          </div>
-        </div>
-        <div>
-          <label class="block text-sm text-slate-300/80 mb-1">Provider (optional)</label>
-          <select id="rcProvider" class="w-full chip rounded-xl px-3 py-2">
-            <option value="">All providers</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="flex items-center gap-3">
-        <button id="rcCalc" class="px-4 py-2 rounded-xl border border-slate-600 hover:bg-white/5">Calculate</button>
-        <span id="rcNote" class="text-sm text-slate-300/70"></span>
-      </div>
-
-      <div class="overflow-x-auto mt-4">
-        <table class="min-w-full text-sm">
-          <thead class="bg-white/5">
-            <tr>
-              <th class="text-left px-5 py-3">Provider</th>
-              <th class="text-left px-5 py-3">Region</th>
-              <th class="text-right px-5 py-3">Price / GPU-hr</th>
-              <th class="text-right px-5 py-3">Total cost</th>
-              <th class="text-left px-5 py-3">Source</th>
-            </tr>
-          </thead>
-          <tbody id="rcBody"></tbody>
-        </table>
-      </div>
-    </section>
-
-  </main>
-
-  <footer class="max-w-7xl mx-auto px-5 sm:px-8 pb-10 pt-6 text-sm text-slate-400/80">
-    Built for internal benchmarking.
-  </footer>
-
-  <script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+<script>
   // ------------------ CONFIG (relative to /docs) ------------------
   const PATHS = {
     scores: 'data/derived/provider_scores_latest.csv',
@@ -230,39 +14,30 @@
   const fmtUSD = v => (v===null||v===undefined||v==='') ? '–' : `$${Number(v).toFixed(2)}`;
   const numify = v => {
     if (v===null || v===undefined) return null;
-    const s = String(v).trim();
-    if (!s) return null;
+    const s = String(v).trim(); if (!s) return null;
     const x = parseFloat(s.replace(/[^\d.\-]/g,''));
     return Number.isFinite(x) ? x : null;
   };
   const clean = s => (s ?? '').toString().trim();
   const shortTs = s => { if(!s) return '–'; try { return dayjs(s).format('YYYY-MM-DD HH:mm'); } catch { return s; } };
   const toHours = (label) => ({'1 hour':1,'1 day':24,'1 week':168,'1 month':720}[label] ?? 1);
+  function showErr(msg){ const el = $('#err'); el.textContent = msg; el.classList.remove('hidden'); console.error(msg); }
 
-  function showErr(msg){
-    const el = $('#err'); el.textContent = msg; el.classList.remove('hidden');
-    console.error(msg);
-  }
-
-  function fetchCsv(url){
-    return new Promise((resolve,reject)=>{
-      Papa.parse(url+(url.includes('?')?'&':'?')+'_=' + Date.now(), {
-        download:true, header:true, dynamicTyping:false, skipEmptyLines:true,
-        complete: res => resolve(res.data||[]), error: err => reject(err)
-      });
-    });
-  }
-
-  async function readCSV(path, label){
-    const base = new URL('.', location.href).href;
-    const primary = new URL(path, base).href;
-    try {
-      const rows = await fetchCsv(primary);
-      return rows;
-    } catch (e) {
-      showErr(`[${label}] failed: ${primary}`);
-      return [];
+  // Robust fetch + parse (no Papa download mode; avoids path quirks)
+  async function loadCSV(path, label){
+    const url = new URL(path, new URL('.', location.href)).href;
+    const bust = url + (url.includes('?')?'&':'?') + '_=' + Date.now();
+    const res = await fetch(bust, {cache:'no-store'});
+    const text = await res.text();
+    if (!res.ok || !text.length){
+      showErr(`[${label}] HTTP ${res.status}; bytes=${text.length}; url=${url}`);
+      return {rows:[], meta:{status:res.status, bytes:text.length}};
     }
+    const parsed = Papa.parse(text, {header:true, dynamicTyping:false, skipEmptyLines:true});
+    if (parsed.errors?.length) console.warn(`[${label}] Papa errors`, parsed.errors.slice(0,3));
+    const rows = parsed.data || [];
+    if (!rows.length) showErr(`[${label}] parsed 0 rows; bytes=${text.length}; url=${url}`);
+    return {rows, meta:{status:res.status, bytes:text.length}};
   }
 
   // ------------------ STATE ------------------
@@ -272,24 +47,23 @@
   function normalizeScores(rows){
     return rows.map(o=>{
       const r = {...o};
-      // handle BOM on provider header if any
-      if (r["\ufeffprovider"] && !r.provider) r.provider = r["\ufeffprovider"];
+      if (r["\ufeffprovider"] && !r.provider) r.provider = r["\ufeffprovider"]; // BOM guard
 
       r.provider  = r.provider ?? r.Provider ?? r.name ?? '';
       r.region    = r.region ?? r.Region ?? 'Global';
       r.gpu_model = (r.gpu_model ?? r.gpu ?? r.model ?? '').toString().toUpperCase();
-      r.type      = r.type ?? r.price_type ?? '';
+      r.type      = r.type ?? r.price_type ?? '';      // may be empty
       r.gpu_count = r.gpu_count ?? r.count ?? r.GPU_count ?? '';
       r.duration  = r.duration ?? r.reserved_duration ?? r.term ?? '';
       r.timestamp = r.timestamp ?? r.asof_utc ?? r.fetched_at_utc ?? r.ts_utc ?? r.ts_iso ?? '';
       r.priceiq_score = numify(r.priceiq_score ?? r.score);
 
-      // price fields (use effective first)
+      // prices
       r.effective_price_usd_per_gpu_hr =
         numify(r.effective_price_usd_per_gpu_hr ?? r.usd_per_gpu_hr ?? r.effective_price ?? r.price_hourly_usd_per_gpu);
-
       r.price_hourly_usd   = numify(r.price_hourly_usd ?? r.price);
       r.price_reserved_usd = numify(r.price_reserved_usd ?? r.reserved_price ?? r.reserved_usd_per_gpu_hr);
+
       return r;
     });
   }
@@ -319,7 +93,7 @@
     if(rs != null && on == null) return 'Reserved';
     if(on != null && rs != null) return 'On-Demand';
     return row.type || '';
-    }
+  }
 
   function applyFilters(){
     const g = $('#fGpu').value, r = $('#fRegion').value, t = $('#fType').value, d = $('#fDuration').value, c = $('#fCount').value;
@@ -404,7 +178,7 @@
   function initRoiCalcControls(){
     const gpuSel = $('#rcGpu'), regSel = $('#rcRegion'), provSel = $('#rcProvider');
     const gpus = Array.from(new Set(state.raw.map(x=>clean(x.gpu_model)))).filter(Boolean).sort();
-    const regs = Array.from(new Set(state.raw.map(x=>clean(x.region)||"Global")))).filter(Boolean).sort();
+    const regs = Array.from(new Set(state.raw.map(x=>clean(x.region)||"Global"))).filter(Boolean).sort();
     const provs = Array.from(new Set(state.raw.map(x=>clean(x.provider)))).filter(Boolean).sort();
 
     gpuSel.innerHTML = gpus.map(g=>`<option>${g}</option>`).join('');
@@ -430,7 +204,6 @@
     const lines = [];
 
     if (useP50 && state.market.length){
-      // market row: prefer exact region, else Global, else any
       let mr = state.market.find(m => clean(m.gpu_model)===gpu && clean(m.region)===region) ||
                state.market.find(m => clean(m.gpu_model)===gpu && clean(m.region).toLowerCase()==='global') ||
                state.market.find(m => clean(m.gpu_model)===gpu);
@@ -484,14 +257,12 @@
 
   (async function init(){
     try{
-      // load files (relative to /docs)
-      const [scoresRows, roiRows, marketRows] = await Promise.all([
-        readCSV(PATHS.scores, 'scores'),
-        readCSV(PATHS.roi, 'roi'),
-        readCSV(PATHS.market, 'market')
+      const [{rows:scoresRows, meta:sm},{rows:roiRows},{rows:marketRows}] = await Promise.all([
+        loadCSV(PATHS.scores,'scores'),
+        loadCSV(PATHS.roi,'roi'),
+        loadCSV(PATHS.market,'market')
       ]);
 
-      // normalize/keep usable
       state.raw = normalizeScores(scoresRows).filter(r =>
         r.effective_price_usd_per_gpu_hr != null ||
         r.price_hourly_usd != null ||
@@ -510,18 +281,14 @@
         market_p90: numify(m.market_p90)
       }));
 
-      state.roi = roiRows||[];
-      renderRoiTable(state.roi);
+      renderRoiTable(roiRows||[]);
 
-      // timestamps
       const lastTs = (state.raw.map(r=>r.timestamp).filter(Boolean).sort().pop()) || null;
-      $('#lastUpdated').textContent = lastTs ? shortTs(lastTs) : 'no timestamp';
+      $('#lastUpdated').textContent = lastTs ? shortTs(lastTs) : `HTTP ${sm?.status||'?'} • bytes=${sm?.bytes||'?'}`;
 
-      // filters + initial render
       populateFilters(buildUniques());
       applyFilters();
 
-      // ROI calc controls
       initRoiCalcControls();
       runRoiCalc();
 
@@ -530,9 +297,8 @@
       showErr("Fatal init error: " + (e?.message||e));
     }
   })();
-  </script>
-</body>
-</html>
+</script>
+
 
 
 

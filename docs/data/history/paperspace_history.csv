@@ -2,3 +2,4 @@ provider,region,gpu_model,type,duration,gpu_count,price_hourly_usd,source_url,fe
 Paperspace,Global,H100,On-Demand,1h,,2.24,https://www.paperspace.com/pricing,2025-09-10 16:30:26
 Paperspace,Global,H100,On-Demand,1h,,2.24,https://www.paperspace.com/pricing,2025-09-10 16:45:19
 Paperspace,Global,H100,On-Demand,1h,,2.24,https://www.paperspace.com/pricing,2025-09-10 16:53:19
+Paperspace,Global,H100,On-Demand,1h,,2.24,https://www.paperspace.com/pricing,2025-09-10 17:01:12

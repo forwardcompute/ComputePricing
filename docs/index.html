@@ -1,303 +1,441 @@
-<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Price-IQ — GPU Market Dashboard</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.11/dayjs.min.js"></script>
+  <style>
+    :root{
+      --bg:#0f1115;--card:#151922;--muted:#a9b0c2;--text:#e7ecf7;--accent:#6ad1ff;--good:#23d18b;--bad:#ff6b6b;
+      --border:#262b36;--chip:#1e2431;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial}
+    a{color:var(--accent);text-decoration:none}
+    .wrap{max-width:1200px;margin:auto;padding:24px}
+    header h1{margin:0 0 6px;font-size:26px}
+    header .sub{color:var(--muted);font-size:13px}
+    .grid{display:grid;gap:12px}
+    .g2{grid-template-columns:repeat(2,1fr)}
+    .g3{grid-template-columns:repeat(3,1fr)}
+    .g4{grid-template-columns:repeat(4,1fr)}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
+    .kpi{display:flex;flex-direction:column;gap:2px}
+    .kpi .label{color:var(--muted);font-size:12px}
+    .kpi .value{font-size:20px;font-weight:600}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    select,input,button{background:#0f131b;border:1px solid var(--border);color:var(--text);border-radius:10px;padding:10px 12px;font:inherit}
+    select{min-width:150px}
+    button.primary{background:#1a2332;border-color:#293041}
+    button.primary:hover{background:#202a3b}
+    table{width:100%;border-collapse:separate;border-spacing:0}
+    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;font-size:13px}
+    th{color:var(--muted);font-weight:600}
+    .right{text-align:right}
+    .chip{background:var(--chip);border:1px solid var(--border);padding:2px 8px;border-radius:999px;color:var(--muted);font-size:12px}
+    .muted{color:var(--muted)}
+    .ok{color:var(--good)} .bad{color:var(--bad)}
+    .warn{color:#f3c97a}
+    footer{color:var(--muted);margin-top:24px;font-size:12px}
+    @media (max-width: 900px){ .g4{grid-template-columns:repeat(2,1fr)} .g3{grid-template-columns:repeat(2,1fr)} }
+    @media (max-width: 640px){ .g2,.g3,.g4{grid-template-columns:1fr} select{min-width:unset;width:100%} }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header class="row" style="justify-content:space-between;align-items:center">
+    <div>
+      <h1>Price-IQ</h1>
+      <div class="sub">Auto-generated from <code>docs/data/derived/</code>. Shows per-GPU $/hr, KPIs, leaderboard, ROI, and predictions.</div>
+    </div>
+    <div id="last-updated" class="chip">loading…</div>
+  </header>
+
+  <!-- Filters -->
+  <section class="card" style="margin-top:16px">
+    <div class="row">
+      <select id="f_gpu"></select>
+      <select id="f_region"></select>
+      <select id="f_type"></select>
+      <select id="f_duration"></select>
+      <select id="f_gcount"></select>
+      <button id="btn_clear" class="primary">Clear</button>
+    </div>
+  </section>
+
+  <!-- KPIs -->
+  <section class="grid g4" style="margin-top:12px">
+    <div class="card kpi">
+      <div class="label">Cheapest / GPU-hr</div>
+      <div id="kpi_min" class="value">–</div>
+    </div>
+    <div class="card kpi">
+      <div class="label">Median / GPU-hr</div>
+      <div id="kpi_med" class="value">–</div>
+    </div>
+    <div class="card kpi">
+      <div class="label">Providers covered</div>
+      <div id="kpi_prov" class="value">–</div>
+      <div class="muted" id="kpi_prov_list" style="font-size:11px"></div>
+    </div>
+    <div class="card kpi">
+      <div class="label">Entries</div>
+      <div id="kpi_rows" class="value">0</div>
+    </div>
+  </section>
+
+  <!-- Leaderboard -->
+  <section class="card" style="margin-top:12px">
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h3 style="margin:0">Leaderboard (Price-IQ)</h3>
+      <div class="muted">Sorted by price ↑</div>
+    </div>
+    <div style="overflow:auto">
+      <table id="tbl_leader">
+        <thead>
+          <tr>
+            <th>Provider</th><th>Region</th><th>GPU</th><th>Type</th><th>Duration</th><th class="right">Count</th>
+            <th class="right">$ / GPU-hr</th><th class="right">Score</th><th>Timestamp</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ROI table -->
+  <section class="card" style="margin-top:12px">
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h3 style="margin:0">ROI (Cheapest total cost)</h3>
+      <span class="chip">from <code>roi_comparison.csv</code></span>
+    </div>
+    <div style="overflow:auto">
+      <table id="tbl_roi">
+        <thead>
+        <tr>
+          <th>GPU</th><th class="right">Count</th><th>Duration</th><th>Provider</th><th>Region</th>
+          <th class="right">$ / GPU-hr</th><th class="right">Total cost</th><th>When</th>
+        </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Quick ROI Calculator -->
+  <section class="card" style="margin-top:12px">
+    <h3 style="margin:0 0 8px">ROI Calculator (quick)</h3>
+    <div class="row" style="gap:10px;margin-bottom:10px">
+      <select id="calc_gpu"></select>
+      <select id="calc_region"></select>
+      <input id="calc_count" type="number" min="1" step="1" value="8" style="width:110px" />
+      <select id="calc_duration"></select>
+      <label class="row" style="align-items:center;gap:8px">
+        <input id="calc_use_pred" type="checkbox" />
+        Use predictions (P50) if available
+      </label>
+      <button class="primary" id="btn_calc">Calculate</button>
+    </div>
+    <div id="calc_result" class="muted">No matching quotes.</div>
+    <div style="overflow:auto;margin-top:8px">
+      <table id="tbl_calc"><thead>
+        <tr><th>Provider</th><th>Region</th><th class="right">$ / GPU-hr</th><th class="right">Total cost</th><th>Source</th></tr>
+      </thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <!-- Prediction block -->
+  <section class="grid g4" style="margin-top:12px">
+    <div class="card kpi">
+      <div class="label">Predicted price (P10)</div><div id="p10" class="value">–</div>
+    </div>
+    <div class="card kpi">
+      <div class="label">Predicted price (P25)</div><div id="p25" class="value">–</div>
+    </div>
+    <div class="card kpi">
+      <div class="label">Predicted price (P50)</div><div id="p50" class="value">–</div>
+    </div>
+    <div class="card kpi">
+      <div class="label">Predicted price (P75 / P90)</div>
+      <div class="value"><span id="p75">–</span> / <span id="p90">–</span></div>
+    </div>
+  </section>
+
+  <!-- Compute calculator snapshot -->
+  <section class="card" style="margin-top:12px">
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h3 style="margin:0">Compute Calculator Snapshot</h3>
+      <span class="chip">from <code>compute_calculator_snapshot.csv</code></span>
+    </div>
+    <div style="overflow:auto">
+      <table id="tbl_compute">
+        <thead>
+          <tr>
+            <th>GPU</th><th>Provider type</th><th>$ / GPU-hr</th><th class="right">TOTAL (term)</th>
+            <th class="right">lo</th><th class="right">md</th><th class="right">hi</th><th class="right">term hrs</th>
+            <th class="right">GPUs</th><th>Region</th><th class="right">#quotes</th><th>Source</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <div>Tip: data loads from <code>docs/data/derived/*.csv</code>. If a section is empty, check your CI run & artifact paths.</div>
+  </footer>
+</div>
+
 <script>
-  // ------------------ CONFIG (relative to /docs) ------------------
-  const PATHS = {
-    scores: 'data/derived/provider_scores_latest.csv',
-    roi:    'data/derived/roi_comparison.csv',
-    market: 'data/derived/market_index.csv'
-  };
+(async function(){
+  // ---- Paths (change if index.html is placed inside /docs)
+  const PATH = "docs/data/derived/";
+  const FILE_SCORES   = PATH + "provider_scores_latest.csv";
+  const FILE_ROI      = PATH + "roi_comparison.csv";
+  const FILE_PREDJSON = PATH + "price_predict_snapshot.json";
+  const FILE_CCALC    = PATH + "compute_calculator_snapshot.csv";
+  const FILE_MARKET   = PATH + "market_index.csv"; // optional
 
-  // ------------------ Helpers ------------------
+  // ---- Utils
   const $ = sel => document.querySelector(sel);
-  const $$ = sel => Array.from(document.querySelectorAll(sel));
-  const fmtUSD = v => (v===null||v===undefined||v==='') ? '–' : `$${Number(v).toFixed(2)}`;
-  const numify = v => {
-    if (v===null || v===undefined) return null;
-    const s = String(v).trim(); if (!s) return null;
-    const x = parseFloat(s.replace(/[^\d.\-]/g,''));
-    return Number.isFinite(x) ? x : null;
+  const $$ = sel => document.querySelectorAll(sel);
+  const fmtUSD = (x, d=2) => (x==null || isNaN(x)) ? "–" :
+    "$" + Number(x).toLocaleString(undefined,{minimumFractionDigits:d, maximumFractionDigits:d});
+  const fmtNum = x => (x==null || isNaN(x)) ? "–" : Number(x).toLocaleString();
+  const hToStr = h => {
+    if(!isFinite(h)) return "–";
+    if(h % 720 === 0) return (h/720) + " month";
+    if(h % 168 === 0) return (h/168) + " week";
+    if(h % 24 === 0)  return (h/24) + " day";
+    return h + " hour";
   };
-  const clean = s => (s ?? '').toString().trim();
-  const shortTs = s => { if(!s) return '–'; try { return dayjs(s).format('YYYY-MM-DD HH:mm'); } catch { return s; } };
-  const toHours = (label) => ({'1 hour':1,'1 day':24,'1 week':168,'1 month':720}[label] ?? 1);
-  function showErr(msg){ const el = $('#err'); el.textContent = msg; el.classList.remove('hidden'); console.error(msg); }
+  function hoursForLabel(lbl){
+    const s = String(lbl||"").toLowerCase();
+    if (s.includes("month")) return 720*parseFloat(s)||720;
+    if (s.includes("week"))  return 168*parseFloat(s)||168;
+    if (s.includes("day"))   return 24*parseFloat(s)||24;
+    if (s.includes("hour"))  return parseFloat(s)||1;
+    return NaN;
+  }
 
-  // Robust fetch + parse (no Papa download mode; avoids path quirks)
-  async function loadCSV(path, label){
-    const url = new URL(path, new URL('.', location.href)).href;
-    const bust = url + (url.includes('?')?'&':'?') + '_=' + Date.now();
-    const res = await fetch(bust, {cache:'no-store'});
+  async function loadCSV(url){
+    const res = await fetch(url, {cache:"no-store"});
+    if(!res.ok) throw new Error(`Fetch failed ${url}: ${res.status}`);
     const text = await res.text();
-    if (!res.ok || !text.length){
-      showErr(`[${label}] HTTP ${res.status}; bytes=${text.length}; url=${url}`);
-      return {rows:[], meta:{status:res.status, bytes:text.length}};
-    }
-    const parsed = Papa.parse(text, {header:true, dynamicTyping:false, skipEmptyLines:true});
-    if (parsed.errors?.length) console.warn(`[${label}] Papa errors`, parsed.errors.slice(0,3));
-    const rows = parsed.data || [];
-    if (!rows.length) showErr(`[${label}] parsed 0 rows; bytes=${text.length}; url=${url}`);
-    return {rows, meta:{status:res.status, bytes:text.length}};
+    const parsed = Papa.parse(text, {header:true, dynamicTyping:true, skipEmptyLines:true});
+    return parsed.data;
   }
 
-  // ------------------ STATE ------------------
-  const state = { raw: [], filtered: [], asc:true, market: [], roi: [] };
+  let SCORES=[], ROI=[], CCALC=[], PRED={}, MARKET=[];
+  try { SCORES = await loadCSV(FILE_SCORES); } catch(e){ console.warn(e) }
+  try { ROI    = await loadCSV(FILE_ROI); }    catch(e){ console.warn(e) }
+  try { CCALC  = await loadCSV(FILE_CCALC); }  catch(e){ console.warn(e) }
+  try { MARKET = await loadCSV(FILE_MARKET);}  catch(e){ /* optional */ }
+  try {
+    const r = await fetch(FILE_PREDJSON, {cache:"no-store"});
+    if (r.ok) PRED = await r.json();
+  } catch(e){ console.warn(e) }
 
-  // ------------------ LOAD + NORMALIZE ------------------
-  function normalizeScores(rows){
-    return rows.map(o=>{
-      const r = {...o};
-      if (r["\ufeffprovider"] && !r.provider) r.provider = r["\ufeffprovider"]; // BOM guard
+  // last updated
+  $("#last-updated").textContent = PRED?.asof_utc ? ("Updated: " + PRED.asof_utc) : "Updated: –";
 
-      r.provider  = r.provider ?? r.Provider ?? r.name ?? '';
-      r.region    = r.region ?? r.Region ?? 'Global';
-      r.gpu_model = (r.gpu_model ?? r.gpu ?? r.model ?? '').toString().toUpperCase();
-      r.type      = r.type ?? r.price_type ?? '';      // may be empty
-      r.gpu_count = r.gpu_count ?? r.count ?? r.GPU_count ?? '';
-      r.duration  = r.duration ?? r.reserved_duration ?? r.term ?? '';
-      r.timestamp = r.timestamp ?? r.asof_utc ?? r.fetched_at_utc ?? r.ts_utc ?? r.ts_iso ?? '';
-      r.priceiq_score = numify(r.priceiq_score ?? r.score);
+  // ---- Build filters
+  const gpuSet     = new Set(SCORES.map(r=>String(r.gpu_model||"").toUpperCase()).filter(Boolean));
+  const regionSet  = new Set(SCORES.map(r=>r.region||"Global").filter(Boolean));
+  const typeSet    = new Set(SCORES.map(r=>r.type||"On-Demand").filter(Boolean));
+  const durSet     = new Set(SCORES.map(r=>r.duration||"1h").filter(Boolean));
+  const gcSet      = new Set(SCORES.map(r=>r.gpu_count).filter(x=>x!=null && x!==""));
 
-      // prices
-      r.effective_price_usd_per_gpu_hr =
-        numify(r.effective_price_usd_per_gpu_hr ?? r.usd_per_gpu_hr ?? r.effective_price ?? r.price_hourly_usd_per_gpu);
-      r.price_hourly_usd   = numify(r.price_hourly_usd ?? r.price);
-      r.price_reserved_usd = numify(r.price_reserved_usd ?? r.reserved_price ?? r.reserved_usd_per_gpu_hr);
-
-      return r;
+  function fillSelect(el, arr, allLabel="All"){
+    el.innerHTML = "";
+    const optAll = document.createElement("option"); optAll.value=""; optAll.textContent=allLabel;
+    el.appendChild(optAll);
+    [...arr].sort((a,b)=> String(a).localeCompare(String(b),undefined,{numeric:true})).forEach(v=>{
+      const o=document.createElement("option"); o.value=v; o.textContent=v; el.appendChild(o);
     });
   }
+  fillSelect($("#f_gpu"), gpuSet, "GPU: All");
+  fillSelect($("#f_region"), regionSet, "Region: All");
+  fillSelect($("#f_type"), typeSet, "Type: All");
+  fillSelect($("#f_duration"), durSet, "Duration: All");
+  fillSelect($("#f_gcount"), gcSet, "GPU Count: All");
 
-  function buildUniques(){
-    const uniq = (arr, key) => Array.from(new Set(arr.map(x=>clean(x[key])))).filter(Boolean).sort((a,b)=>String(a).localeCompare(String(b)));
-    return {
-      gpu: uniq(state.raw, 'gpu_model'),
-      region: uniq(state.raw, 'region'),
-      duration: uniq(state.raw, 'duration'),
-      count: uniq(state.raw, 'gpu_count')
-    };
-  }
+  // calc selects (defaults)
+  fillSelect($("#calc_gpu"), gpuSet, "GPU");
+  fillSelect($("#calc_region"), regionSet, "Region");
+  fillSelect($("#calc_duration"), ["1 hour","1 day","1 week","1 month"], "Duration");
 
-  function populateFilters(u){
-    const add = (el, vals) => { el.innerHTML = '<option value="">All</option>' + vals.map(v=>`<option>${v}</option>`).join(''); };
-    add($('#fGpu'), u.gpu);
-    add($('#fRegion'), u.region);
-    add($('#fDuration'), u.duration);
-    add($('#fCount'), u.count);
-  }
-
-  function inferType(row){
-    const on = row.price_hourly_usd;
-    const rs = row.price_reserved_usd;
-    if(on != null && rs == null) return 'On-Demand';
-    if(rs != null && on == null) return 'Reserved';
-    if(on != null && rs != null) return 'On-Demand';
-    return row.type || '';
-  }
-
+  // ---- Filtering + render
   function applyFilters(){
-    const g = $('#fGpu').value, r = $('#fRegion').value, t = $('#fType').value, d = $('#fDuration').value, c = $('#fCount').value;
+    const fs = {
+      gpu: $("#f_gpu").value,
+      region: $("#f_region").value,
+      type: $("#f_type").value,
+      dur: $("#f_duration").value,
+      gcount: $("#f_gcount").value
+    };
+    let rows = SCORES.slice();
 
-    state.filtered = state.raw.filter(x=>{
-      const type = inferType(x);
-      return (!g || clean(x.gpu_model)===g) &&
-             (!r || clean(x.region)===r) &&
-             (!t || type===t) &&
-             (!d || clean(x.duration)===d) &&
-             (!c || clean(x.gpu_count)===c);
-    });
+    if (fs.gpu)    rows = rows.filter(r => String(r.gpu_model||"").toUpperCase() === String(fs.gpu).toUpperCase());
+    if (fs.region) rows = rows.filter(r => String(r.region||"") === fs.region);
+    if (fs.type)   rows = rows.filter(r => String(r.type||"").toLowerCase().includes(String(fs.type).toLowerCase()));
+    if (fs.dur)    rows = rows.filter(r => String(r.duration||"") === fs.dur);
+    if (fs.gcount) rows = rows.filter(r => String(r.gpu_count||"") === String(fs.gcount));
 
-    state.filtered.sort((a,b)=>{
-      const pa = a.effective_price_usd_per_gpu_hr ?? a.price_hourly_usd ?? a.price_reserved_usd ?? Infinity;
-      const pb = b.effective_price_usd_per_gpu_hr ?? b.price_hourly_usd ?? b.price_reserved_usd ?? Infinity;
-      return state.asc ? (pa - pb) : (pb - pa);
-    });
+    // KPIs
+    $("#kpi_rows").textContent = fmtNum(rows.length);
+    const uniqProv = [...new Set(rows.map(r=>r.provider).filter(Boolean))];
+    $("#kpi_prov").textContent = fmtNum(uniqProv.length);
+    $("#kpi_prov_list").textContent = uniqProv.sort().slice(0,6).join(", ") + (uniqProv.length>6? " …":"");
 
-    renderLeaderboard();
-    renderKpis();
-  }
+    const priceCol = "effective_price_usd_per_gpu_hr";
+    const prices = rows.map(r=>Number(r[priceCol])).filter(x=>isFinite(x));
+    const med = (arr)=>{ const a=[...arr].sort((x,y)=>x-y); const m=(a.length-1)/2; return (a[Math.floor(m)]+a[Math.ceil(m)])/2; };
+    $("#kpi_min").textContent = prices.length? fmtUSD(Math.min(...prices)) : "–";
+    $("#kpi_med").textContent = prices.length? fmtUSD(med(prices)) : "–";
 
-  function renderKpis(){
-    const prices = state.filtered
-      .map(x => x.effective_price_usd_per_gpu_hr ?? x.price_hourly_usd ?? x.price_reserved_usd)
-      .filter(v => v!=null && !Number.isNaN(v));
-    const cheapest = prices.length ? Math.min(...prices) : null;
-    const median = prices.length ? prices.slice().sort((a,b)=>a-b)[Math.floor(prices.length/2)] : null;
-
-    $('#kpiCheapest').textContent = fmtUSD(cheapest);
-    $('#kpiMedian').textContent = fmtUSD(median);
-    $('#kpiRows').textContent = state.filtered.length.toLocaleString();
-    $('#kpiProviders').textContent = new Set(state.filtered.map(x=>clean(x.provider))).size || '–';
-
-    if(cheapest!==null){
-      const row = state.filtered.find(x => (x.effective_price_usd_per_gpu_hr ?? x.price_hourly_usd ?? x.price_reserved_usd) === cheapest);
-      $('#kpiCheapestMeta').textContent = row ? `${clean(row.provider)} · ${clean(row.region)} · ${clean(row.gpu_model)} (${inferType(row)})` : '';
-    } else $('#kpiCheapestMeta').textContent = '';
-    $('#kpiMedianMeta').textContent = prices.length ? `${prices.length} quotes` : '';
-  }
-
-  function renderLeaderboard(){
-    const body = $('#lbBody'); body.innerHTML = '';
-    for(const row of state.filtered){
-      const type = inferType(row);
-      const price = row.effective_price_usd_per_gpu_hr ?? row.price_hourly_usd ?? row.price_reserved_usd;
-      const score = row.priceiq_score ?? '';
-      const tr = document.createElement('tr');
+    // Leaderboard
+    const tbody = $("#tbl_leader tbody"); tbody.innerHTML="";
+    rows.sort((a,b)=> (a[priceCol]-b[priceCol]) || (b.priceiq_score - a.priceiq_score) );
+    rows.forEach(r=>{
+      const tr=document.createElement("tr");
       tr.innerHTML = `
-        <td class="px-5 py-3 font-medium">${clean(row.provider)}</td>
-        <td class="px-5 py-3">${clean(row.region)||'Global'}</td>
-        <td class="px-5 py-3">${clean(row.gpu_model)}</td>
-        <td class="px-5 py-3">${type ? `<span class="badge ${type==='Reserved' ? 'badge-res':'badge-on'}">${type}</span>` : '–'}</td>
-        <td class="px-5 py-3">${clean(row.duration)||'–'}</td>
-        <td class="px-5 py-3">${clean(row.gpu_count)||'–'}</td>
-        <td class="px-5 py-3 text-right">${fmtUSD(price)}</td>
-        <td class="px-5 py-3 text-right">${score ? Number(score).toFixed(2) : '–'}</td>
-        <td class="px-5 py-3">${shortTs(row.timestamp)}</td>
-      `;
-      body.appendChild(tr);
-    }
+        <td>${r.provider||""}</td>
+        <td>${r.region||""}</td>
+        <td>${r.gpu_model||""}</td>
+        <td>${r.type||""}</td>
+        <td>${r.duration||""}</td>
+        <td class="right">${fmtNum(r.gpu_count)}</td>
+        <td class="right">${fmtUSD(r[priceCol])}</td>
+        <td class="right">${r.priceiq_score!=null? Number(r.priceiq_score).toFixed(1):"–"}</td>
+        <td><span class="muted">${r.timestamp||""}</span></td>`;
+      tbody.appendChild(tr);
+    });
   }
 
-  // ------------------ ROI (precomputed) ------------------
-  function renderRoiTable(rows){
-    if(!rows?.length) return;
-    const head = Object.keys(rows[0]);
-    const thead = $('#roiHead');
-    thead.innerHTML = `<tr>${head.map(h=>`<th class="text-left px-5 py-3">${h}</th>`).join('')}</tr>`;
-    const tbody = $('#roiBody');
-    tbody.innerHTML = rows.map(r=>{
-      return `<tr>${head.map(h=>{
-        let v = r[h];
-        if(/price|cost|usd|per_gpu_hr/i.test(h)) v = fmtUSD(numify(v));
-        return `<td class="px-5 py-3">${(v ?? '–')}</td>`;
-      }).join('')}</tr>`;
-    }).join('');
+  // ROI table render
+  function renderROI(){
+    const tbody=$("#tbl_roi tbody"); tbody.innerHTML="";
+    ROI.forEach(r=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML = `
+        <td>${r.gpu_model||""}</td>
+        <td class="right">${fmtNum(r.gpu_count)}</td>
+        <td>${r.duration||""}</td>
+        <td>${r.best_provider||""}</td>
+        <td>${r.best_region||""}</td>
+        <td class="right">${fmtUSD(r.price_per_gpu_hr)}</td>
+        <td class="right">${fmtUSD(r.total_cost_usd,2)}</td>
+        <td><span class="muted">${r.timestamp||""}</span></td>`;
+      tbody.appendChild(tr);
+    });
   }
 
-  // ------------------ ROI Calculator (uses market p50 optionally) ------------------
-  function initRoiCalcControls(){
-    const gpuSel = $('#rcGpu'), regSel = $('#rcRegion'), provSel = $('#rcProvider');
-    const gpus = Array.from(new Set(state.raw.map(x=>clean(x.gpu_model)))).filter(Boolean).sort();
-    const regs = Array.from(new Set(state.raw.map(x=>clean(x.region)||"Global"))).filter(Boolean).sort();
-    const provs = Array.from(new Set(state.raw.map(x=>clean(x.provider)))).filter(Boolean).sort();
-
-    gpuSel.innerHTML = gpus.map(g=>`<option>${g}</option>`).join('');
-    regSel.innerHTML = ['Global', ...regs.filter(r=>r!=='Global')].map(r=>`<option>${r}</option>`).join('');
-    provSel.innerHTML = `<option value="">All providers</option>` + provs.map(p=>`<option>${p}</option>`).join('');
+  // Compute calculator snapshot
+  function renderCompute(){
+    const tbody=$("#tbl_compute tbody"); tbody.innerHTML="";
+    CCALC.forEach(r=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML = `
+        <td>${r.gpu_model||""}</td>
+        <td>${r.provider_type||""}</td>
+        <td>${r["$/GPU-hr"]||r['$/GPU/hr']||""}</td>
+        <td class="right">${r.TOTAL||""}</td>
+        <td class="right">${fmtNum(r.price_lo)}</td>
+        <td class="right">${fmtNum(r.price_md)}</td>
+        <td class="right">${fmtNum(r.price_hi)}</td>
+        <td class="right">${fmtNum(r.term_hours)}</td>
+        <td class="right">${fmtNum(r.gpu_count)}</td>
+        <td>${r.used_region||""}</td>
+        <td class="right">${fmtNum(r.n_quotes)}</td>
+        <td>${r.source||""}</td>`;
+      tbody.appendChild(tr);
+    });
   }
 
-  function runRoiCalc(){
-    const gpu = $('#rcGpu').value;
-    const region = $('#rcRegion').value;
-    const cnt = Math.max(1, Number($('#rcCount').value||1));
-    const hrs = toHours($('#rcDuration').value);
-    const util = Math.min(100, Math.max(1, Number($('#rcUtil').value||100))) / 100;
-    const providerFilter = $('#rcProvider').value;
-    const useP50 = $('#rcUsePred').checked;
+  // Predictions block
+  function renderPred(){
+    const keys=["p10","p25","p50","p75","p90"];
+    keys.forEach(k=>{
+      const v = PRED?.[k];
+      $("#"+k).textContent = (v==null? "–" : fmtUSD(v));
+    });
+  }
 
-    const pool = state.raw.filter(r =>
-      clean(r.gpu_model)===gpu &&
-      (!providerFilter || clean(r.provider)===providerFilter) &&
-      (region==='' || clean(r.region||'Global')===region || clean(r.region).toLowerCase()==='global')
+  // Quick ROI calc
+  function onCalc(){
+    const gpu = $("#calc_gpu").value || "H100";
+    const reg = $("#calc_region").value || "US";
+    const count = Math.max(1, parseInt($("#calc_count").value || "8", 10));
+    const durLabel = $("#calc_duration").value || "1 month";
+    const hours = hoursForLabel(durLabel);
+
+    const pool = SCORES.filter(r =>
+      String(r.gpu_model||"").toUpperCase()===String(gpu).toUpperCase() &&
+      String(r.type||"").toLowerCase().includes("on-demand")
     );
 
-    const lines = [];
+    const predP50 = (PRED && PRED.gpu_model===gpu && PRED.region===reg && isFinite(PRED.p50)) ? Number(PRED.p50) : null;
 
-    if (useP50 && state.market.length){
-      let mr = state.market.find(m => clean(m.gpu_model)===gpu && clean(m.region)===region) ||
-               state.market.find(m => clean(m.gpu_model)===gpu && clean(m.region).toLowerCase()==='global') ||
-               state.market.find(m => clean(m.gpu_model)===gpu);
-      if (mr && numify(mr.market_median)!=null){
-        const price = numify(mr.market_median);
-        lines.push({provider:"Market P50", region: mr.region || region || '—', price, total: price*cnt*hrs*util, source:"market_index.csv"});
-      }
+    const rows = pool
+      .filter(r => !reg || r.region===reg)
+      .map(r => {
+        const price = Number(r.effective_price_usd_per_gpu_hr);
+        return {
+          provider: r.provider, region: r.region, price,
+          total: price * count * hours, source: r.source_url || "", ts: r.timestamp
+        }
+      })
+      .sort((a,b)=> a.total-b.total)
+      .slice(0,12);
+
+    // If checkbox ticked and prediction available, show a synthetic row
+    const usePred = $("#calc_use_pred").checked && predP50!=null;
+    const tbody=$("#tbl_calc tbody"); tbody.innerHTML="";
+    if (usePred) {
+      const synth = {provider:"(predicted @ P50)", region: reg, price: predP50, total: predP50*count*hours, source:"prediction"};
+      rows.unshift(synth);
     }
 
-    if (pool.length){
-      const best = [...pool].sort((a,b)=>{
-        const pa = a.effective_price_usd_per_gpu_hr ?? a.price_hourly_usd ?? a.price_reserved_usd ?? Infinity;
-        const pb = b.effective_price_usd_per_gpu_hr ?? b.price_hourly_usd ?? b.price_reserved_usd ?? Infinity;
-        return pa - pb;
-      })[0];
-      const price = best.effective_price_usd_per_gpu_hr ?? best.price_hourly_usd ?? best.price_reserved_usd;
-      if (price!=null){
-        lines.push({provider: clean(best.provider), region: clean(best.region)||'Global', price, total: price*cnt*hrs*util, source:"provider_scores_latest.csv"});
-      }
+    if (rows.length===0){
+      $("#calc_result").textContent = "No matching quotes.";
+      return;
     }
+    $("#calc_result").textContent = `${rows.length} option(s)`;
 
-    lines.sort((a,b)=>a.total-b.total);
-    const body = $('#rcBody'); body.innerHTML='';
-    for(const row of lines){
-      const tr = document.createElement('tr');
+    rows.forEach(r=>{
+      const tr=document.createElement("tr");
       tr.innerHTML = `
-        <td class="px-5 py-3 font-medium">${row.provider}</td>
-        <td class="px-5 py-3">${row.region}</td>
-        <td class="px-5 py-3 text-right">${fmtUSD(row.price)}</td>
-        <td class="px-5 py-3 text-right">${fmtUSD(row.total)}</td>
-        <td class="px-5 py-3">${row.source}</td>
-      `;
-      body.appendChild(tr);
-    }
-    $('#rcNote').textContent = lines.length ? `${lines.length} option(s)` : 'No matching options';
+        <td>${r.provider}</td>
+        <td>${r.region}</td>
+        <td class="right">${fmtUSD(r.price)}</td>
+        <td class="right">${fmtUSD(r.total)}</td>
+        <td><span class="muted">${r.source||""}</span></td>`;
+      tbody.appendChild(tr);
+    });
   }
 
-  // ------------------ Events & Boot ------------------
-  $('#clearBtn').addEventListener('click', ()=>{
-    $$('#fGpu,#fRegion,#fType,#fDuration,#fCount').forEach(s=>s.value='');
+  // Wire up
+  $$("#f_gpu, #f_region, #f_type, #f_duration, #f_gcount").forEach(el=> el.addEventListener("change", applyFilters));
+  $("#btn_clear").addEventListener("click", ()=>{
+    $$("#f_gpu, #f_region, #f_type, #f_duration, #f_gcount").forEach(el=> el.value="");
     applyFilters();
   });
-  $$('#fGpu,#fRegion,#fType,#fDuration,#fCount').forEach(s=>s.addEventListener('change', applyFilters));
-  $('#sortBtn').addEventListener('click', ()=>{
-    state.asc = !state.asc;
-    $('#sortBtn').textContent = state.asc ? 'Price ↑' : 'Price ↓';
-    applyFilters();
-  });
-  $('#rcCalc').addEventListener('click', runRoiCalc);
-  $('#rcUsePred').addEventListener('change', runRoiCalc);
+  $("#btn_calc").addEventListener("click", onCalc);
 
-  (async function init(){
-    try{
-      const [{rows:scoresRows, meta:sm},{rows:roiRows},{rows:marketRows}] = await Promise.all([
-        loadCSV(PATHS.scores,'scores'),
-        loadCSV(PATHS.roi,'roi'),
-        loadCSV(PATHS.market,'market')
-      ]);
-
-      state.raw = normalizeScores(scoresRows).filter(r =>
-        r.effective_price_usd_per_gpu_hr != null ||
-        r.price_hourly_usd != null ||
-        r.price_reserved_usd != null
-      );
-
-      state.market = (marketRows||[]).map(m=>({
-        gpu_model: (m.gpu_model||'').toString().toUpperCase(),
-        region: clean(m.region)||'Global',
-        market_count: numify(m.market_count),
-        market_mean: numify(m.market_mean),
-        market_median: numify(m.market_median),
-        market_p10: numify(m.market_p10),
-        market_p25: numify(m.market_p25),
-        market_p75: numify(m.market_p75),
-        market_p90: numify(m.market_p90)
-      }));
-
-      renderRoiTable(roiRows||[]);
-
-      const lastTs = (state.raw.map(r=>r.timestamp).filter(Boolean).sort().pop()) || null;
-      $('#lastUpdated').textContent = lastTs ? shortTs(lastTs) : `HTTP ${sm?.status||'?'} • bytes=${sm?.bytes||'?'}`;
-
-      populateFilters(buildUniques());
-      applyFilters();
-
-      initRoiCalcControls();
-      runRoiCalc();
-
-      if (!state.raw.length) showErr("No usable rows in provider_scores_latest.csv");
-    }catch(e){
-      showErr("Fatal init error: " + (e?.message||e));
-    }
-  })();
+  // Initial draws
+  applyFilters();
+  renderROI();
+  renderCompute();
+  renderPred();
+  onCalc();
+})();
 </script>
+</body>
+</html>
 
 
 

@@ -7,8 +7,8 @@ Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/
 Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-10 16:53:22
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-10 17:01:15
 Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-10 17:01:15
-Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-10 17:09:12
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-10 17:09:12
+Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-10 17:09:12
 Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-10 17:20:48
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-10 17:20:48
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-10 17:29:52
@@ -19,8 +19,8 @@ Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-10 20:23:11
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-11 01:30:40
 Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-11 01:30:40
-Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-11 04:25:57
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-11 04:25:57
+Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-11 04:25:57
 Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-11 08:28:12
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-11 08:28:12
 Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-11 12:41:50
@@ -29,10 +29,10 @@ Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-11 16:27:49
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-11 20:21:40
 Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-11 20:21:40
-Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-12 01:27:29
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-12 01:27:29
-Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-12 04:25:43
+Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-12 01:27:29
 Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-12 04:25:43
+Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-12 04:25:43
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-12 08:27:15
 Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-12 08:27:15
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-12 12:41:40
@@ -41,3 +41,5 @@ Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/
 Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-12 16:22:18
 Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-12 20:23:27
 Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-12 20:23:27
+Hydra Host (Brokkr),Global,H100,On-Demand,1h,1,2.3,https://brokkr.hydrahost.com/inventory,2025-09-13 01:24:14
+Hydra Host (Brokkr),Global,H200,On-Demand,1h,1,2.5,https://brokkr.hydrahost.com/inventory,2025-09-13 01:24:14

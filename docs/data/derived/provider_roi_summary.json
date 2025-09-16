@@ -2,7 +2,7 @@
   "gpu_model": "H100",
   "region": "Global",
   "fleet_gpus": 80,
-  "price_per_gpu_hr_initial": 2.325,
+  "price_per_gpu_hr_initial": 2.275,
   "oversub_multiplier": 2.0,
   "price_erosion_yoy": 0.2,
   "util_model": "linear",
@@ -17,7 +17,7 @@
   "depreciation_months": 36,
   "tax_rate": 0.0,
   "months": 60,
-  "payback_month": 23,
-  "irr_monthly": 0.03261738789953898,
-  "irr_annualized": 0.4698506356943497
+  "payback_month": 24,
+  "irr_monthly": 0.03125710165327508,
+  "irr_annualized": 0.4467831015334671
 }

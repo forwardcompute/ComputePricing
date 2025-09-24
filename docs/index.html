@@ -57,7 +57,7 @@
   <div class="wrap">
     <header>
       <h1>Price-IQ</h1>
-      <span class="small">Auto-generated from <code>docs/data/derived/</code></span>
+      <span class="small">Auto-generated from <code>data/derived/</code></span>
       <div class="updated" id="asOf">Updated: —</div>
     </header>
 
@@ -167,10 +167,10 @@
       </div>
     </div>
 
-    <!-- PROVIDER HISTORY -->
+    <!-- PROVIDER HISTORY (H100/H200) -->
     <div class="sectionTitle">
       <h3 style="margin:0">Provider history</h3>
-      <span class="small">from <code>docs/data/history/*.csv</code></span>
+      <span class="small">from <code>data/history/*.csv</code></span>
     </div>
     <div class="card">
       <div class="controls" style="flex-wrap:wrap;margin-bottom:8px">
@@ -210,39 +210,73 @@
     </div>
 
     <p class="small" style="margin:16px 4px 40px">
-      Tip: data loads from <code>docs/data/derived/*.csv</code> and <code>docs/data/history/*.csv</code>. If a section is empty, check your CI run & artifact paths.
+      Tip: serve this over HTTP (e.g. <code>python -m http.server</code>). Data loads from <code>data/derived/</code> and <code>data/history/</code>.
+      Turn on the debug toggle to see which files were found.
     </p>
   </div>
 
 <script>
 (function(){
-  // ---------- utils ----------
+  // ---------------------- DEBUG LOGGER ----------------------
+  const dbg = [];
+  function logDbg(msg){
+    dbg.push(msg);
+    const el = document.getElementById("debugLines");
+    if (el) el.innerHTML = dbg.map(s=>`<div>${s}</div>`).join("");
+  }
+  document.getElementById("toggleDebug").addEventListener("change",(e)=>{
+    document.getElementById("debugPanel").classList.toggle("on", e.target.checked);
+  });
+
+  // ---------------------- UTILS ----------------------
   const fmt = {
     money:n=> n==null||isNaN(n) ? '–' : `$${Number(n).toFixed(2)}`,
     money0:n=> n==null||isNaN(n) ? '–' : `$${Number(n).toFixed(0)}`,
     num:n  => n==null||isNaN(n) ? '–' : Number(n).toLocaleString(),
     date:s => s? String(s).replace('T',' ').replace('Z',''): '–'
   };
-  const parseCSV=(txt)=>{
-    const lines=txt.trim().split(/\r?\n/);
-    const cols=lines.shift().split(",").map(h=>h.trim());
-    return lines.filter(Boolean).map(line=>{
-      const cells=line.split(",").map(s=>s.trim());
-      const obj={}; cols.forEach((c,i)=>obj[c]=cells[i]??"");
-      return obj;
-    });
-  };
-  const uniq = arr => [...new Set(arr)];
-  const byNumAsc = key => (a,b)=> (+a[key]||1e9)-(+b[key]||1e9);
   function numify(x){ return x==null ? NaN : Number(String(x).replace(/[^\d.\-]/g,"")); }
-  async function tryFetch(path){ const r=await fetch(path,{cache:"no-store"}); if(!r.ok) throw new Error(r.status); return r; }
+  function parseCSV(txt){
+    const lines = txt.replace(/^\uFEFF/,'').trim().split(/\r?\n/);
+    if (!lines.length) return [];
+    const header = lines.shift().split(",").map(h=>h.trim());
+    return lines.filter(Boolean).map(line=>{
+      const cells = line.split(",").map(s=>s.trim());
+      const o={}; header.forEach((h,i)=>o[h]=cells[i]??"");
+      return o;
+    });
+  }
+  const uniq = arr => [...new Set(arr)];
+  const byNumAsc = key => (a,b)=> (+a[key]||1e12)-(+b[key]||1e12);
 
-  // ---------- paths ----------
-  const P_DER="docs/data/derived/", F_DER="data/derived/";
-  const P_HIS="docs/data/history/",  F_HIS="data/history/";
-  async function getDer(p){ try{ return await tryFetch(P_DER+p);}catch{ return await tryFetch(F_DER+p);} }
-  async function getHis(p){ try{ return await tryFetch(P_HIS+p);}catch{ return await tryFetch(F_HIS+p);} }
+  // ---------------------- ROBUST PATHS ----------------------
+  async function tryFetch(url){
+    const r = await fetch(url,{cache:"no-store"});
+    if(!r.ok) throw new Error(r.status+" "+url);
+    return r;
+  }
+  const DER_BASES = ["data/derived/","./data/derived/","../data/derived/","docs/data/derived/","./docs/data/derived/","/data/derived/","/docs/data/derived/"];
+  const HIS_BASES = ["data/history/","./data/history/","../data/history/","docs/data/history/","./docs/data/history/","/data/history/","/docs/data/history/"];
+  async function getDerived(file){
+    for(const b of DER_BASES){
+      try{ const r=await tryFetch(b+file); logDbg("✅ "+b+file); return r; }catch(e){}
+    }
+    logDbg("❌ MISSING: "+file); throw new Error("Missing "+file);
+  }
+  async function getHistory(file){
+    for(const b of HIS_BASES){
+      try{ const r=await tryFetch(b+file); logDbg("✅ "+b+file); return r; }catch(e){}
+    }
+    logDbg("❌ MISSING (history): "+file); throw new Error("Missing "+file);
+  }
 
+  // ---------------------- STATE ----------------------
+  const state = {
+    scores:[], roi:[], predict:null, snap:[],
+    filters: {gpu:"All", region:"All", type:"On-Demand", duration:"All", count:"All"}
+  };
+
+  // ---------------------- LOAD DERIVED ----------------------
   const files = {
     scores : "provider_scores_latest.csv",
     roi    : "roi_comparison.csv",
@@ -250,121 +284,84 @@
     snap   : "compute_calculator_snapshot.csv"
   };
 
-  // provider name -> history filename
-  const HISTORY_FILES = [
-    {name:"Vast.ai",               file:"vastai_history.csv"},
-    {name:"VoltagePark",           file:"voltagepark_history.csv"},
-    {name:"TensorDock",            file:"tensordock_history.csv"},
-    {name:"SFCompute",             file:"sfcompute_history.csv"},
-    {name:"Runpod",                file:"runpod_history.csv"},
-    {name:"Paperspace",            file:"paperspace_history.csv"},
-    {name:"Nebius",                file:"nebius_history.csv"},
-    {name:"Lambda Labs",           file:"lambda_labs_history.csv"},
-    {name:"CrusoeCloud",           file:"crusoecloud_history.csv"},
-    {name:"Hydra Host (Brokkr)",   file:"brokkr_history.csv"}
-  ];
-  const historyCache = new Map();
-
-  // ---------- state ----------
-  const state = {
-    scores:[], roi:[], predict:null, snap:[],
-    filters: {gpu:"All", region:"All", type:"On-Demand", duration:"All", count:"All"}
-  };
-
-  // ---------- load derived ----------
   async function loadAll(){
-    const dbg=[];
     try{
-      const txt=await (await getDer(files.scores)).text();
-      state.scores=parseCSV(txt).map(r=>({
+      const txt = await (await getDerived(files.scores)).text();
+      state.scores = parseCSV(txt).map(r=>({
         provider:r.provider, region:r.region, gpu:r.gpu_model, type:r.type, duration:r.duration,
         count: r.gpu_count ? Number(r.gpu_count) : null,
         price: numify(r.effective_price_usd_per_gpu_hr),
         score: r.priceiq_score ? Number(r.priceiq_score) : null,
         ts: r.timestamp
       })).filter(r=>isFinite(r.price));
-      dbg.push(`✅ scores: ${state.scores.length}`);
-    }catch{ dbg.push("❌ scores failed"); }
+      logDbg(`rows(scores): ${state.scores.length}`);
+    }catch(e){ logDbg("scores load error: "+e); }
 
     try{
-      const txt=await (await getDer(files.roi)).text();
-      state.roi=parseCSV(txt).map(r=>({
+      const txt = await (await getDerived(files.roi)).text();
+      state.roi = parseCSV(txt).map(r=>({
         gpu:r.gpu_model, count:Number(r.gpu_count), duration:r.duration,
         provider:r.best_provider, region:r.best_region,
         p:Number(r.price_per_gpu_hr), total:Number(r.total_cost_usd), ts:r.timestamp
       }));
-      dbg.push(`✅ roi: ${state.roi.length}`);
-    }catch{ dbg.push("❌ roi failed"); }
+      logDbg(`rows(roi): ${state.roi.length}`);
+    }catch(e){ logDbg("roi load error: "+e); }
 
-    try{ state.predict=await (await getDer(files.predict)).json(); dbg.push("✅ predict"); }
-    catch{ dbg.push("ℹ️ predict missing (ok)"); }
+    try{ state.predict = await (await getDerived(files.predict)).json(); logDbg("predict: ok"); }
+    catch(e){ logDbg("predict not found (ok)"); }
 
-    try{ const txt=await (await getDer(files.snap)).text(); state.snap=parseCSV(txt); dbg.push(`✅ snapshot: ${state.snap.length}`); }
-    catch{ dbg.push("❌ snapshot failed"); }
+    try{ const txt = await (await getDerived(files.snap)).text(); state.snap = parseCSV(txt); logDbg(`rows(snapshot): ${state.snap.length}`); }
+    catch(e){ logDbg("snapshot load error: "+e); }
 
-    document.getElementById("debugLines").innerHTML = dbg.map(s=>`<div>${s}</div>`).join("");
     initFilters();
     hydrateAll();
+    initQuickCalc(); // ensure QC populated + run
     initHistoryUI();
   }
 
-  // ---------- filters ----------
+  // ---------------------- FILTERS + KPI ----------------------
   function setOptions(el, arr, withAll=true){
-    el.innerHTML = (withAll?["All",...arr]:arr).map(v=>`<option>${v}</option>`).join("");
+    const vals = withAll ? ["All", ...arr] : arr;
+    el.innerHTML = vals.map(v=>`<option>${v}</option>`).join("");
   }
+
   function initFilters(){
-    const gpus=uniq(state.scores.map(r=>r.gpu)).sort();
-    const regs=uniq(state.scores.map(r=>r.region)).sort();
-    const types=uniq(state.scores.map(r=>r.type)).sort();
-    const durs=uniq(state.scores.map(r=>r.duration)).sort();
-    const counts=uniq(state.scores.map(r=>r.count).filter(Boolean)).sort((a,b)=>a-b);
+    const gpus = uniq(state.scores.map(r=>r.gpu)).sort();
+    const regs = uniq(state.scores.map(r=>r.region)).sort();
+    const types= uniq(state.scores.map(r=>r.type)).sort();
+    const durs = uniq(state.scores.map(r=>r.duration)).sort();
+    const cnts = uniq(state.scores.map(r=>r.count).filter(Boolean)).sort((a,b)=>a-b);
 
     const gpuSel=document.getElementById("f_gpu");
     const regSel=document.getElementById("f_region");
-    const typeSel=document.getElementById("f_type");
+    const typSel=document.getElementById("f_type");
     const durSel=document.getElementById("f_duration");
     const cntSel=document.getElementById("f_count");
 
     setOptions(gpuSel,gpus);
     setOptions(regSel,regs);
-    setOptions(typeSel,types);
+    setOptions(typSel,types);
     setOptions(durSel,durs);
-    setOptions(cntSel,counts);
+    setOptions(cntSel,cnts);
 
-    gpuSel.value = gpus.includes("H100") ? "H100" : "All";
-    typeSel.value = types.includes("On-Demand") ? "On-Demand" : "All";
+    gpuSel.value = gpus.includes("H100") ? "H100" : (gpus[0]||"All");
+    typSel.value = types.includes("On-Demand") ? "On-Demand" : "All";
     regSel.value="All"; durSel.value="All"; cntSel.value="All";
-    state.filters={gpu:gpuSel.value, region:"All", type:typeSel.value, duration:"All", count:"All"};
+    state.filters={gpu:gpuSel.value, region:"All", type:typSel.value, duration:"All", count:"All"};
 
-    [gpuSel,regSel,typeSel,durSel,cntSel].forEach((el,i)=>{
+    [gpuSel,regSel,typSel,durSel,cntSel].forEach((el,i)=>{
       const keys=["gpu","region","type","duration","count"]; const k=keys[i];
       el.addEventListener("change", ()=>{ state.filters[k]=el.value; hydrateAll(); });
     });
+
     document.getElementById("btnClear").onclick=()=>{
-      gpuSel.value = gpus.includes("H100") ? "H100" : "All";
-      typeSel.value = types.includes("On-Demand") ? "On-Demand" : "All";
+      gpuSel.value = gpus.includes("H100") ? "H100" : (gpus[0]||"All");
+      typSel.value = types.includes("On-Demand") ? "On-Demand" : "All";
       regSel.value="All"; durSel.value="All"; cntSel.value="All";
-      state.filters={gpu:gpuSel.value, region:"All", type:typeSel.value, duration:"All", count:"All"};
+      state.filters={gpu:gpuSel.value, region:"All", type:typSel.value, duration:"All", count:"All"};
       hydrateAll();
     };
 
-    // --- populate Quick Calc selects + defaults ---
-    const qc_gpu=document.getElementById("qc_gpu");
-    const qc_region=document.getElementById("qc_region");
-    const qc_count=document.getElementById("qc_count");
-    const qc_dur=document.getElementById("qc_dur");
-    setOptions(qc_gpu,gpus,false);
-    setOptions(qc_region,regs,false);
-    setOptions(qc_count,[8,16,32,64],false);
-    setOptions(qc_dur,["1 hour","1 day","1 week","1 month"],false);
-    qc_gpu.value = gpus.includes("H100") ? "H100" : (gpus[0]||"");
-    qc_region.value = regs.includes("Global") ? "Global" : (regs[0]||"");
-    qc_count.value = "8";
-    qc_dur.value = "1 hour";
-    document.getElementById("btnCalc").onclick = runQuickCalc;
-    runQuickCalc(); // show something on load
-
-    // as-of
     const latest = state.scores.map(r=>r.ts).filter(Boolean).sort().pop();
     document.getElementById("asOf").textContent = "Updated: " + (latest ? fmt.date(latest) : new Date().toISOString().replace('T',' ').replace('Z',''));
   }
@@ -380,7 +377,6 @@
     );
   }
 
-  // ---------- populate sections ----------
   function hydrateAll(){
     const rows=applyFilters(state.scores).sort(byNumAsc("price"));
     document.getElementById("kpi_rows").textContent = rows.length;
@@ -400,6 +396,7 @@
       document.getElementById("kpi_med_sub").textContent="";
     }
 
+    // Leaderboard
     document.querySelector("#tbl_leader tbody").innerHTML = rows.map(r=>`
       <tr>
         <td>${r.provider}</td><td>${r.region}</td><td>${r.gpu}</td>
@@ -411,6 +408,7 @@
         <td class="right">${fmt.date(r.ts)}</td>
       </tr>`).join("");
 
+    // ROI table
     document.querySelector("#tbl_roi tbody").innerHTML = state.roi.map(r=>`
       <tr>
         <td>${r.gpu}</td><td>${r.count}</td><td>${r.duration}</td>
@@ -420,6 +418,7 @@
         <td class="right">${fmt.date(r.ts)}</td>
       </tr>`).join("");
 
+    // Snapshot
     const cbody=document.querySelector("#tbl_comp tbody");
     cbody.innerHTML = state.snap.map(r=>{
       const lo = r.price_lo ?? r.price_lo_usd ?? r.lo;
@@ -442,58 +441,127 @@
     }).join("");
 
     // Pred tiles
-    const pp=state.predict||{};
-    const moneyOrDash=v=>(v==null||isNaN(v))?"–":`$${Number(v).toFixed(2)}`;
-    document.getElementById("p10").textContent=moneyOrDash(pp.p10);
-    document.getElementById("p25").textContent=moneyOrDash(pp.p25);
-    document.getElementById("p50").textContent=moneyOrDash(pp.p50);
-    document.getElementById("p7590").textContent=`${moneyOrDash(pp.p75||pp.p50)} / ${moneyOrDash(pp.p90)}`;
+    const pp = state.predict||{};
+    const moneyOrDash = v => (v==null||isNaN(v)) ? "–" : `$${Number(v).toFixed(2)}`;
+    document.getElementById("p10").textContent  = moneyOrDash(pp.p10);
+    document.getElementById("p25").textContent  = moneyOrDash(pp.p25);
+    document.getElementById("p50").textContent  = moneyOrDash(pp.p50);
+    document.getElementById("p7590").textContent= `${moneyOrDash(pp.p75||pp.p50)} / ${moneyOrDash(pp.p90)}`;
   }
 
-  // ---------- quick calc ----------
-  function toHours(str){
-    if(!str) return 0;
-    const s=String(str).toLowerCase();
-    if(s.includes("week")) return 24*7;
-    if(s.includes("month"))return 24*30;
-    if(s.includes("day"))  return 24;
-    return 1; // 1 hour
+  // ---------------------- QUICK CALC ----------------------
+  function initQuickCalc(){
+    const gpus = uniq(state.scores.map(r=>r.gpu)).sort();
+    const regs = uniq(state.scores.map(r=>r.region)).sort();
+
+    function set(el, arr){ el.innerHTML = arr.map(v=>`<option>${v}</option>`).join(""); }
+    const qc_gpu   = document.getElementById("qc_gpu");
+    const qc_region= document.getElementById("qc_region");
+    const qc_count = document.getElementById("qc_count");
+    const qc_dur   = document.getElementById("qc_dur");
+
+    set(qc_gpu, gpus);
+    set(qc_region, regs);
+    set(qc_count, [8,16,32,64]);
+    set(qc_dur, ["1 hour","1 day","1 week","1 month"]);
+
+    qc_gpu.value   = gpus.includes("H100") ? "H100" : (gpus[0]||"");
+    qc_region.value= regs.includes("Global") ? "Global" : (regs[0]||"");
+    qc_count.value = "8";
+    qc_dur.value   = "1 hour";
+
+    document.getElementById("btnCalc").onclick = runQuickCalc;
+    runQuickCalc(); // render once on load
   }
+
+  function durToHours(s){
+    const v = String(s||"").toLowerCase();
+    if (v.includes("month")) return 24*30;
+    if (v.includes("week"))  return 24*7;
+    if (v.includes("day"))   return 24;
+    return 1; // hour
+  }
+
   function runQuickCalc(){
-    const gpu=document.getElementById("qc_gpu").value;
-    const reg=document.getElementById("qc_region").value;
-    const cnt=Number(document.getElementById("qc_count").value||0);
-    const hours=toHours(document.getElementById("qc_dur").value);
-    const usePred=document.getElementById("qc_usePred").checked;
+    const gpu  = document.getElementById("qc_gpu").value;
+    let   reg  = document.getElementById("qc_region").value;
+    const cnt  = Number(document.getElementById("qc_count").value||0);
+    const hrs  = durToHours(document.getElementById("qc_dur").value);
+    const usePred = document.getElementById("qc_usePred").checked;
 
-    let rows=state.scores.filter(r=> r.gpu===gpu && r.region===reg && /On-Demand/i.test(r.type));
-    const byProv=new Map();
+    // Primary: exact region
+    let rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && /On-Demand/i.test(r.type));
+    // If empty, relax region to any with data (and update select to reflect what we actually used)
+    if (!rows.length){
+      const any = state.scores.find(r=> r.gpu===gpu && /On-Demand/i.test(r.type));
+      if (any){ reg = any.region; rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && /On-Demand/i.test(r.type));
+               document.getElementById("qc_region").value = reg; logDbg(`QC: no rows for chosen region, using ${reg}`); }
+    }
+
+    const byProv = new Map();
     rows.forEach(r=>{
       const k=r.provider+"|"+r.region;
       const best=byProv.get(k);
       if(!best || r.price<best.price) byProv.set(k,r);
     });
 
-    let out=[...byProv.values()].map(r=>({provider:r.provider, region:r.region, price:r.price, total:r.price*cnt*hours, src:"observed"}));
+    let out=[...byProv.values()].map(r=>({
+      provider:r.provider, region:r.region, price:r.price, total:r.price*cnt*hrs, src:"observed"
+    }));
+
     if(usePred && state.predict && state.predict.gpu_model===gpu && state.predict.region===reg && state.predict.p50){
-      out.push({provider:"Predicted (P50)", region:reg, price:Number(state.predict.p50), total:Number(state.predict.p50)*cnt*hours, src:"predicted"});
+      out.push({ provider:"Predicted (P50)", region:reg, price:Number(state.predict.p50), total:Number(state.predict.p50)*cnt*hrs, src:"predicted" });
     }
+
     out.sort((a,b)=>a.total-b.total);
     document.querySelector("#tbl_qc tbody").innerHTML = out.map(r=>`
-      <tr><td>${r.provider}</td><td>${r.region}</td><td class="right">${fmt.money(r.price)}</td><td class="right">${fmt.money0(r.total)}</td><td class="right"><span class="badge">${r.src}</span></td></tr>`).join("");
+      <tr>
+        <td>${r.provider}</td><td>${r.region}</td>
+        <td class="right">${fmt.money(r.price)}</td>
+        <td class="right">${fmt.money0(r.total)}</td>
+        <td class="right"><span class="badge">${r.src}</span></td>
+      </tr>`).join("");
   }
-  document.getElementById("btnCalc").addEventListener("click", runQuickCalc);
 
-  // ---------- provider history ----------
+  // ---------------------- PROVIDER HISTORY ----------------------
+  const historyCache = new Map();
+
+  function providerToCandidates(name){
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+    const parts = base.split(/\s+/);
+    const glued = [
+      parts.join(''),
+      parts.join('-'),
+      parts.join('_')
+    ];
+    const extras = [];
+    // common aliases
+    if (base.includes('lambda')) extras.push('lambdalabs','lambda_labs','lambda-labs','lambda');
+    if (base.includes('crusoe')) extras.push('crusoecloud','crusoe_cloud','crusoe-cloud','crusoe');
+    if (base.includes('vast'))   extras.push('vastai','vast_ai','vast-ai');
+    if (base.includes('voltage'))extras.push('voltagepark','voltage_park','voltage-park');
+    if (base.includes('tensor')) extras.push('tensordock','tensor_dock','tensor-dock');
+    if (base.includes('runpod')) extras.push('runpod');
+    if (base.includes('paperspace')) extras.push('paperspace');
+    if (base.includes('nebius')) extras.push('nebius');
+    if (base.includes('sfcompute') || base.includes('sf compute')) extras.push('sfcompute','sf-compute','sf_compute');
+    if (base.includes('hydra') || base.includes('brokkr')) extras.push('brokkr','hydra_host','hydra-host');
+
+    const names = [...new Set([...glued, ...extras])];
+    const files = [];
+    names.forEach(n=>{
+      files.push(`${n}_history.csv`, `${n}-history.csv`, `${n}.csv`);
+    });
+    return files;
+  }
+
   function initHistoryUI(){
-    const providerSel=document.getElementById("hist_provider");
-    const available=HISTORY_FILES.map(h=>h.name);
-    const names=uniq(state.scores.map(r=>r.provider)).filter(n=>available.includes(n));
-    const list=names.length?names:available;
-    providerSel.innerHTML=list.map(n=>`<option>${n}</option>`).join("");
-    providerSel.value=list[0]||"Vast.ai";
+    const providers = uniq(state.scores.map(r=>r.provider)).sort();
+    const sel = document.getElementById("hist_provider");
+    sel.innerHTML = providers.map(p=>`<option>${p}</option>`).join("");
+    sel.value = providers[0] || "";
 
-    // default GPU = match top filter if H200 else H100
+    // default GPU tied to top filter (prefer H100)
     document.getElementById("hist_gpu").value = state.filters.gpu==="H200" ? "H200" : "H100";
 
     ["hist_provider","hist_gpu","hist_dur","hist_cnt","hist_range"].forEach(id=>{
@@ -502,78 +570,81 @@
     renderHistory();
   }
 
-  async function renderHistory(){
-    const prov=document.getElementById("hist_provider").value;
-    const gpu=document.getElementById("hist_gpu").value;
-    const dur=document.getElementById("hist_dur").value;
-    const cnt=document.getElementById("hist_cnt").value;
-    const range=document.getElementById("hist_range").value;
+  async function loadHistoryForProvider(provider){
+    // cache key = provider
+    if (historyCache.has(provider)) return historyCache.get(provider);
 
-    const entry=HISTORY_FILES.find(h=>h.name===prov);
-    if(!entry){ console.warn("No mapping for provider", prov); return; }
-
-    let rows=historyCache.get(entry.file);
-    if(!rows){
+    // try many filename variants until one exists
+    const candidates = providerToCandidates(provider);
+    for (const file of candidates){
       try{
-        const txt=await (await getHis(entry.file)).text();
-        rows=parseCSV(txt).map(r=>{
+        const txt = await (await getHistory(file)).text();
+        const rows = parseCSV(txt).map(r=>{
           const price = numify(r.price_hourly_usd ?? r.price_usd ?? r.price ?? r.effective_price_usd_per_gpu_hr);
-          const ts    = r.fetched_at_utc || r.timestamp || r.fetched_at || r.when;
-          return {
-            provider:r.provider||prov, region:r.region, gpu:r.gpu_model||r.gpu,
-            type:r.type, duration:r.duration, count: r.gpu_count?Number(r.gpu_count):null,
-            price, ts
-          };
-        }).filter(r=>r.price && r.ts);
-        historyCache.set(entry.file, rows);
-      }catch(e){ console.warn("History load failed", entry.file, e); rows=[]; }
+          const ts    = r.fetched_at_utc || r.timestamp || r.fetched_at || r.when || r.ts;
+          const gpu   = r.gpu_model || r.gpu || r.model;
+          const type  = r.type || r.instance_type || r.category;
+          const dur   = r.duration || r.term || r.runtime;
+          const cnt   = r.gpu_count ? Number(r.gpu_count) : (r.count ? Number(r.count) : null);
+          return { provider, region:r.region, gpu, type, duration:dur, count:cnt, price, ts };
+        }).filter(r=> r.ts && isFinite(r.price));
+        logDbg(`history(${provider}): using file ${file} (${rows.length} rows)`);
+        historyCache.set(provider, rows);
+        return rows;
+      }catch(e){
+        // try next variant
+      }
     }
+    logDbg(`history(${provider}): no file found`);
+    historyCache.set(provider, []);
+    return [];
+  }
 
-    // base filter by GPU and (mostly) on-demand; many files have clean types but don't block if missing
+  async function renderHistory(){
+    const prov = document.getElementById("hist_provider").value;
+    const gpu  = document.getElementById("hist_gpu").value;
+    const dur  = document.getElementById("hist_dur").value;
+    const cnt  = document.getElementById("hist_cnt").value;
+    const rng  = document.getElementById("hist_range").value;
+
+    let rows = await loadHistoryForProvider(prov);
+    // base filter: GPU + prefer on-demand if available
     let view = rows.filter(r=> r.gpu===gpu && (!r.type || /On-Demand/i.test(r.type)));
-    const startCount=view.length;
-
-    if(dur!=="All") view = view.filter(r=> (r.duration||"").toLowerCase()===dur.toLowerCase());
-    if(cnt!=="All") view = view.filter(r=> String(r.count)===String(cnt));
-
-    // If too strict, relax to GPU-only so chart never blanks
-    if(view.length===0){
-      view = rows.filter(r=> r.gpu===gpu);
+    let stage = `gpu+on-demand=${view.length}`;
+    if (dur!=="All") view = view.filter(r=> String(r.duration||"").toLowerCase()===dur.toLowerCase());
+    if (cnt!=="All") view = view.filter(r=> String(r.count)===String(cnt));
+    stage += ` → +dur/cnt=${view.length}`;
+    // relax if empty
+    if (!view.length){ view = rows.filter(r=> r.gpu===gpu); stage += " (relaxed to GPU only)"; }
+    // range
+    if (rng!=="all"){
+      const days = Number(rng), cut = Date.now()-days*24*3600*1000;
+      view = view.filter(r=> new Date(r.ts).getTime() >= cut);
+      stage += ` → range(${rng})=${view.length}`;
     }
-
-    // range filter
-    if(range!=="all"){
-      const days=Number(range), cut=Date.now()-days*24*3600*1000;
-      view = view.filter(r=> new Date(r.ts).getTime()>=cut);
-    }
-
     view.sort((a,b)=> new Date(a.ts)-new Date(b.ts));
+
     const labels=view.map(r=> String(r.ts).replace("T"," ").replace("Z",""));
-    const data=view.map(r=> r.price);
+    const data  =view.map(r=> r.price);
 
     const ctx=document.getElementById("histChart").getContext("2d");
-    if(window._histChart) window._histChart.destroy();
+    if (window._histChart) window._histChart.destroy();
     window._histChart = new Chart(ctx,{
       type:'line',
       data:{ labels, datasets:[{ label:`${prov} · ${gpu}${dur!=="All" ? " · "+dur : ""}${cnt!=="All" ? " · "+cnt+" GPUs" : ""}`, data, tension:0.25 }]},
       options:{ responsive:true, plugins:{ legend:{display:true}}, scales:{ y:{ ticks:{ callback:v=>"$"+Number(v).toFixed(2)}}, x:{ ticks:{ autoSkip:true, maxRotation:0 }}}}
-    );
+    });
 
-    // small debug line
-    const dbg = document.getElementById("debugLines");
-    dbg.innerHTML += `<div>history: ${entry.file} → loaded ${rows.length} rows; filtered ${startCount}→${view.length}</div>`;
+    logDbg(`history filtered: ${stage}`);
   }
 
-  // ---------- boot ----------
+  // ---------------------- BOOT ----------------------
   loadAll();
-
-  document.getElementById("toggleDebug").addEventListener("change",(e)=>{
-    document.getElementById("debugPanel").classList.toggle("on", e.target.checked);
-  });
 })();
 </script>
 </body>
 </html>
+
 
 
 

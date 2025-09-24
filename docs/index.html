@@ -1,252 +1,3 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Price-IQ</title>
-<link rel="icon" href="data:,">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
-<style>
-  :root{
-    --bg:#0f1216; --panel:#171b21; --muted:#202532; --text:#e7edf3; --sub:#9fb0c3;
-    --accent:#7bd7ff; --ok:#27d980; --warn:#ffd166; --danger:#ff6b6b;
-    --chip:#222838; --chipStroke:#2b3143; --chipText:#cfd9e5;
-    --row:#12161c; --rowAlt:#141922; --badge:#283042;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif}
-  a{color:var(--accent);text-decoration:none}
-  .wrap{max-width:1120px;margin:28px auto;padding:0 18px}
-  header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
-  header h1{font-size:26px;margin:0}
-  .updated{margin-left:auto;font-size:12px;color:var(--sub);background:var(--panel);border:1px solid var(--chipStroke);padding:6px 10px;border-radius:10px}
-  .row{display:grid;gap:12px}
-  .hero{grid-template-columns:1fr 1fr 1fr 1fr 1fr 110px}
-  .tileRow{grid-template-columns:1fr 1fr 1fr 1fr}
-  @media (max-width:980px){ .hero{grid-template-columns:1fr 1fr} .tileRow{grid-template-columns:1fr 1fr}}
-  .card{background:var(--panel);border:1px solid var(--muted);border-radius:14px;padding:12px}
-  .select, .btn, .inp{width:100%;appearance:none;background:var(--chip);border:1px solid var(--chipStroke);color:var(--text);padding:10px 12px;border-radius:10px}
-  .select{padding-right:36px;background-image:linear-gradient(45deg,transparent 50%,var(--sub) 50%),linear-gradient(135deg,var(--sub) 50%,transparent 50%),linear-gradient(to right,transparent,transparent);
-          background-position:calc(100% - 18px) 16px,calc(100% - 12px) 16px,100% 0;background-size:6px 6px,6px 6px,2.5em 2.5em;background-repeat:no-repeat}
-  .btn{cursor:pointer}
-  .btn.clear{background:#1d2430;border-color:#2a3244}
-  .stat{display:flex;flex-direction:column;gap:6px}
-  .stat h4{margin:0;color:var(--sub);font-weight:600}
-  .stat .val{font-size:28px;font-weight:700}
-  .stat .sub{color:var(--sub);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--badge);color:var(--sub);font-size:12px;border:1px solid var(--chipStroke)}
-  .badge.best{background:rgba(39,217,128,0.12); color:#9ff3c8; border-color:rgba(39,217,128,0.25)}
-  table{width:100%;border-collapse:separate;border-spacing:0 8px}
-  thead th{color:var(--sub);font-weight:600;text-align:left;font-size:12px;padding:0 10px 6px}
-  tbody tr{background:var(--row);border:1px solid var(--muted)}
-  tbody tr:nth-child(even){background:var(--rowAlt)}
-  td{padding:12px 10px;vertical-align:middle}
-  td .pill{display:inline-flex;align-items:center;gap:6px;background:var(--chip);border:1px solid var(--chipStroke);padding:2px 8px;border-radius:999px;font-size:12px;color:var(--chipText)}
-  .right{justify-self:end;text-align:right}
-  .sectionTitle{display:flex;align-items:center;gap:10px;margin:18px 4px 8px}
-  .small{font-size:12px;color:var(--sub)}
-  .debug{display:none}
-  .debug.on{display:block}
-  .controls{display:flex;gap:8px;align-items:center}
-  .switch{display:inline-flex;align-items:center;gap:8px}
-  .switch input{width:18px;height:18px}
-  .control{display:flex;flex-direction:column;gap:6px}
-  .control label{font-size:11px;color:var(--sub);padding-left:2px}
-  /* ROI bar */
-  .barWrap{margin-top:6px;height:6px;background:rgba(255,255,255,0.05);border:1px solid var(--chipStroke);border-radius:999px;overflow:hidden}
-  .bar{height:100%;background:linear-gradient(90deg, var(--accent), #89e1ff)}
-</style>
-</head>
-<body>
-  <div class="wrap">
-    <header>
-      <h1>Price-IQ</h1>
-      <span class="small">Auto-generated from <code>data/derived/</code></span>
-      <div class="updated" id="asOf">Updated: —</div>
-    </header>
-
-    <!-- HERO FILTERS -->
-    <div class="row hero">
-      <div class="control"><label>GPU</label><select id="f_gpu" class="select"></select></div>
-      <div class="control"><label>Region</label><select id="f_region" class="select"></select></div>
-      <div class="control"><label>Type</label><select id="f_type" class="select"></select></div>
-      <div class="control"><label>Duration</label><select id="f_duration" class="select"></select></div>
-      <div class="control"><label>GPU Count</label><select id="f_count" class="select"></select></div>
-      <div class="control"><label>&nbsp;</label><button class="btn clear" id="btnClear">Clear</button></div>
-    </div>
-
-    <!-- KPI TILES -->
-    <div class="row tileRow" style="margin-top:12px">
-      <div class="card stat">
-        <h4>Cheapest / GPU-hr</h4>
-        <div class="val" id="kpi_low">–</div>
-        <div class="sub" id="kpi_low_sub"> </div>
-      </div>
-      <div class="card stat">
-        <h4>Median / GPU-hr</h4>
-        <div class="val" id="kpi_med">–</div>
-        <div class="sub" id="kpi_med_sub"> </div>
-      </div>
-      <div class="card stat">
-        <h4>Providers covered</h4>
-        <div class="val" id="kpi_prov">–</div>
-        <div class="sub" id="kpi_prov_sub">Unique provider names in current filter.</div>
-      </div>
-      <div class="card stat">
-        <h4>Entries</h4>
-        <div class="val" id="kpi_rows">0</div>
-        <div class="sub">Rows displayed in leaderboard.</div>
-      </div>
-    </div>
-
-    <!-- DATA STATUS -->
-    <div class="sectionTitle" style="margin-top:18px">
-      <div class="switch small"><input type="checkbox" id="toggleDebug"><label for="toggleDebug">Show data status (debug)</label></div>
-    </div>
-    <div class="card debug" id="debugPanel"><div id="debugLines" class="small"></div></div>
-
-    <!-- LEADERBOARD -->
-    <div class="sectionTitle">
-      <h3 style="margin:0">Leaderboard (Price-IQ)</h3>
-      <span class="small" id="lbSort">Sorted by price ↑</span>
-    </div>
-    <div class="card">
-      <table id="tbl_leader">
-        <thead>
-          <tr>
-            <th>Provider</th><th>Region</th><th>GPU</th><th>Type</th>
-            <th>Duration</th><th>Count</th>
-            <th class="right">$/GPU-hr</th><th class="right">Score</th><th class="right">Timestamp</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-
-    <!-- ROI (IMPROVED) -->
-    <div class="sectionTitle">
-      <h3 style="margin:0">ROI (Cheapest total cost)</h3>
-      <span class="small">from <code>roi_comparison.csv</code> · <span id="roiMeta"></span></span>
-    </div>
-    <div class="card">
-      <table id="tbl_roi">
-        <thead>
-          <tr>
-            <th>GPU</th><th>Count</th><th>Duration</th><th>Provider</th>
-            <th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-
-    <!-- QUICK CALC -->
-    <div class="sectionTitle"><h3 style="margin:0">ROI Calculator (quick)</h3></div>
-    <div class="card">
-      <div class="controls" style="flex-wrap:wrap;margin-bottom:10px">
-        <select id="qc_gpu"   class="select" style="min-width:160px"></select>
-        <select id="qc_region"class="select" style="min-width:160px"></select>
-        <select id="qc_count" class="select" style="min-width:120px"></select>
-        <select id="qc_dur"   class="select" style="min-width:160px"></select>
-        <label class="switch small"><input type="checkbox" id="qc_usePred"> Use predictions (P50) if available</label>
-        <button class="btn" id="btnCalc">Calculate</button>
-      </div>
-      <table id="tbl_qc">
-        <thead><tr><th>Provider</th><th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th><th class="right">Source</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <div class="row tileRow" style="margin-top:12px">
-        <div class="card stat"><h4>Predicted price (P10)</h4><div class="val" id="p10">–</div></div>
-        <div class="card stat"><h4>Predicted price (P25)</h4><div class="val" id="p25">–</div></div>
-        <div class="card stat"><h4>Predicted price (P50)</h4><div class="val" id="p50">–</div></div>
-        <div class="card stat"><h4>Predicted price (P75 / P90)</h4><div class="val" id="p7590">– / –</div></div>
-      </div>
-    </div>
-
-    <!-- PRICE BENCHMARK (CROSS-PROVIDER) -->
-    <div class="sectionTitle">
-      <h3 style="margin:0">Price benchmark (cross-provider)</h3>
-      <span class="small">from <code>data/derived/provider_scores_latest.csv</code></span>
-    </div>
-    <div class="card" id="benchCard">
-      <div class="row" style="grid-template-columns:320px 1fr; gap:18px">
-        <!-- Controls -->
-        <div>
-          <div class="control" style="margin-bottom:10px"><label>GPU</label>
-            <select id="bm_gpu" class="select"><option>H100</option><option>H200</option></select>
-          </div>
-          <div class="control" style="margin-bottom:10px"><label>Region</label>
-            <select id="bm_region" class="select"></select>
-          </div>
-          <div class="control" style="margin-bottom:10px"><label>Type</label>
-            <select id="bm_type" class="select"></select>
-          </div>
-          <div class="control" style="margin-bottom:10px"><label>Duration</label>
-            <select id="bm_duration" class="select"></select>
-          </div>
-          <div class="control" style="margin-bottom:10px"><label>GPU Count</label>
-            <select id="bm_count" class="select"></select>
-          </div>
-          <button class="btn" id="bm_run">Predict price</button>
-          <div class="small" id="bm_note" style="margin-top:8px;color:var(--sub)"></div>
-        </div>
-
-        <!-- Results -->
-        <div>
-          <div class="row tileRow">
-            <div class="card stat"><h4>10% quantile</h4><div class="val" id="bm_p10">–</div></div>
-            <div class="card stat"><h4>25% quantile</h4><div class="val" id="bm_p25">–</div></div>
-            <div class="card stat"><h4>Median</h4><div class="val" id="bm_p50">–</div></div>
-            <div class="card stat"><h4>75% quantile</h4><div class="val" id="bm_p75">–</div></div>
-            <div class="card stat"><h4>90% quantile</h4><div class="val" id="bm_p90">–</div></div>
-          </div>
-
-          <div class="card" style="margin-top:12px;text-align:center">
-            <div class="small" style="margin-bottom:6px;color:var(--sub)">Predicted price (P50)</div>
-            <div style="font-size:40px;font-weight:800" id="bm_big">–</div>
-          </div>
-
-          <div class="card" style="margin-top:12px">
-            <canvas id="bm_chart" height="120"></canvas>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- FORECAST (72h) -->
-    <div class="sectionTitle">
-      <h3 style="margin:0">Forecast (next 72 hours)</h3>
-      <span class="small">from <code>forecast.csv</code> · <span id="fcMeta"></span></span>
-    </div>
-    <div class="card">
-      <div class="small" id="fcNote" style="margin-bottom:8px;color:var(--sub)"></div>
-      <canvas id="fc_chart" height="120"></canvas>
-    </div>
-
-    <!-- SNAPSHOT -->
-    <div class="sectionTitle">
-      <h3 style="margin:0">Compute Calculator Snapshot</h3>
-      <span class="small">from <code>compute_calculator_snapshot.csv</code></span>
-    </div>
-    <div class="card">
-      <table id="tbl_comp">
-        <thead>
-          <tr>
-            <th>GPU</th><th>Provider type</th><th>$ / GPU-hr</th><th>TOTAL (term)</th>
-            <th class="right">lo</th><th class="right">md</th><th class="right">hi</th>
-            <th class="right">term hrs</th><th class="right">GPUs</th><th>Region</th><th class="right">#quotes</th><th>Source</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-
-    <p class="small" style="margin:16px 4px 40px">
-      Tip: serve over HTTP (e.g. <code>python -m http.server</code>). Data loads from <code>data/derived/</code>.
-      Toggle debug to see which files were found.
-    </p>
-  </div>
-
 <script>
 (function(){
   // ---------------------- DEBUG LOGGER ----------------------
@@ -256,9 +7,12 @@
     const el = document.getElementById("debugLines");
     if (el) el.innerHTML = dbg.map(s=>`<div>${s}</div>`).join("");
   }
-  document.getElementById("toggleDebug").addEventListener("change",(e)=>{
-    document.getElementById("debugPanel").classList.toggle("on", e.target.checked);
-  });
+  const dbgToggle = document.getElementById("toggleDebug");
+  if (dbgToggle) {
+    dbgToggle.addEventListener("change",(e)=>{
+      document.getElementById("debugPanel").classList.toggle("on", e.target.checked);
+    });
+  }
 
   // ---------------------- UTILS ----------------------
   const fmt = {
@@ -287,7 +41,10 @@
     if(!r.ok) throw new Error(r.status+" "+url);
     return r;
   }
-  const DER_BASES = ["data/derived/","./data/derived/","../data/derived/","docs/data/derived/","./docs/data/derived/","/data/derived/","/docs/data/derived/"];
+  const DER_BASES = [
+    "data/derived/","./data/derived/","../data/derived/",
+    "docs/data/derived/","./docs/data/derived/","/data/derived/","/docs/data/derived/"
+  ];
   async function getDerived(file){
     for(const b of DER_BASES){
       try{ const r=await tryFetch(b+file); logDbg("✅ "+b+file); return r; }catch(e){}
@@ -402,7 +159,12 @@
       hydrateAll();
     };
 
-    const latest = state.scores.map(r=>r.ts).filter(Boolean).sort().pop();
+    // "Updated" time from latest of any source (scores favored)
+    const times = [
+      ...state.scores.map(r=>r.ts).filter(Boolean),
+      ...state.roi.map(r=>r.ts).filter(Boolean)
+    ].sort();
+    const latest = times.pop();
     document.getElementById("asOf").textContent = "Updated: " + (latest ? fmt.date(latest) : new Date().toISOString().replace('T',' ').replace('Z',''));
   }
 
@@ -469,7 +231,7 @@
       </tr>`;
     }).join("");
 
-    // Snapshot
+    // Snapshot table
     const cbody=document.querySelector("#tbl_comp tbody");
     cbody.innerHTML = state.snap.map(r=>{
       const lo = r.price_lo ?? r.price_lo_usd ?? r.lo;
@@ -574,34 +336,30 @@
       </tr>`).join("");
   }
 
-  // ---------------------- PRICE BENCHMARK ----------------------
+  // ---------------------- PERMALINK HELPERS (Benchmark state) ----------------------
+  function syncURLFromBenchmark(){
+    const params = new URLSearchParams(location.search);
+    params.set('gpu',      document.getElementById('bm_gpu').value);
+    params.set('region',   document.getElementById('bm_region').value);
+    params.set('type',     document.getElementById('bm_type').value);
+    params.set('duration', document.getElementById('bm_duration').value);
+    params.set('count',    document.getElementById('bm_count').value);
+    const qs = params.toString();
+    history.replaceState(null, '', qs ? ('?'+qs) : location.pathname);
+  }
+  function applyURLToBenchmark(){
+    const sp = new URLSearchParams(location.search);
+    return {
+      gpu:      sp.get('gpu')      || null,
+      region:   sp.get('region')   || null,
+      type:     sp.get('type')     || null,
+      duration: sp.get('duration') || null,
+      count:    sp.get('count')    || null
+    };
+  }
+
+  // ---------------------- PRICE BENCHMARK (w/ Confidence + Deal) ----------------------
   function setOptionsPlain(el, arr){ el.innerHTML = arr.map(v=>`<option>${v}</option>`).join(""); }
-  function quantiles(sortedVals, ps){
-    const n = sortedVals.length; if (!n) return ps.map(()=>NaN);
-    return ps.map(p => {
-      if (n===1) return sortedVals[0];
-      const idx = (n-1)*p, lo=Math.floor(idx), hi=Math.ceil(idx);
-      if (lo===hi) return sortedVals[lo];
-      const w = idx-lo; return sortedVals[lo]*(1-w) + sortedVals[hi]*w;
-    });
-  }
-  function kde(values, gridN=160){
-    const n=values.length; if(!n) return {x:[], y:[]};
-    const mean = values.reduce((a,b)=>a+b,0)/n;
-    const s2 = values.reduce((a,b)=>a+(b-mean)**2,0)/Math.max(1,n-1);
-    const sd = Math.sqrt(Math.max(s2, 1e-9));
-    const h = 1.06*sd*Math.pow(n,-1/5);
-    const minV = Math.min(...values), maxV = Math.max(...values);
-    const pad = 0.15*(maxV-minV || 1);
-    const lo = minV - pad, hi = maxV + pad;
-    const x = Array.from({length:gridN},(_,i)=> lo + (i/(gridN-1))*(hi-lo));
-    const y = x.map(xi=>{
-      let s=0; for(const v of values){ const u=(xi-v)/h; s += Math.exp(-0.5*u*u); }
-      return s/(n*h*Math.sqrt(2*Math.PI));
-    });
-    const ymax = Math.max(...y, 1e-9);
-    return {x, y: y.map(d=>d/ymax)};
-  }
 
   let _bmChart;
   function initBenchmarkUI(){
@@ -618,17 +376,21 @@
     setOptionsPlain(document.getElementById("bm_duration"),durs);
     setOptionsPlain(document.getElementById("bm_count"),   counts);
 
-    document.getElementById("bm_gpu").value      = gpus.includes("H100")?"H100":(gpus[0]||"");
-    document.getElementById("bm_region").value   = regions.includes("Global")?"Global":(regions[0]||"");
-    document.getElementById("bm_type").value     = types.find(t=>/On-Demand/i.test(t)) || (types[0]||"");
-    document.getElementById("bm_duration").value = durs.find(d=>/1h|1 hour/i.test(d)) || (durs[0]||"");
-    document.getElementById("bm_count").value    = counts.includes(8)?8:(counts[0]||"");
+    // Apply URL params if present, else sensible defaults
+    const u = applyURLToBenchmark();
+    document.getElementById("bm_gpu").value      = (u.gpu && gpus.includes(u.gpu)) ? u.gpu : (gpus.includes("H100")?"H100":(gpus[0]||""));
+    document.getElementById("bm_region").value   = (u.region && regions.includes(u.region)) ? u.region : (regions.includes("Global")?"Global":(regions[0]||""));
+    document.getElementById("bm_type").value     = (u.type && types.includes(u.type)) ? u.type : (types.find(t=>/On-Demand/i.test(t)) || (types[0]||""));
+    document.getElementById("bm_duration").value = (u.duration && durs.includes(u.duration)) ? u.duration : (durs.find(d=>/1h|1 hour/i.test(d)) || (durs[0]||""));
+    document.getElementById("bm_count").value    = (u.count && counts.includes(+u.count)) ? +u.count : (counts.includes(8)?8:(counts[0]||""));
 
-    document.getElementById("bm_run").onclick = ()=>{ runBenchmark(); renderForecast(); };
+    document.getElementById("bm_run").onclick = ()=>{ runBenchmark(); renderForecast(); syncURLFromBenchmark(); };
     ["bm_gpu","bm_region","bm_type","bm_duration","bm_count"].forEach(id=>{
-      document.getElementById(id).addEventListener("change", ()=>{ runBenchmark(); renderForecast(); });
+      document.getElementById(id).addEventListener("change", ()=>{ runBenchmark(); renderForecast(); syncURLFromBenchmark(); });
     });
+
     runBenchmark();
+    syncURLFromBenchmark();
   }
 
   function runBenchmark(){
@@ -638,45 +400,107 @@
     const dur0 = document.getElementById("bm_duration").value;
     const cnt0 = document.getElementById("bm_count").value;
 
-    // exact slice
+    // Build a sample; relax progressively for coverage
     let sample = state.scores.filter(r=> r.gpu===gpu && r.region===reg0 && r.type===typ0 && r.duration===dur0 && String(r.count)===String(cnt0));
     let note = `exact slice (${sample.length})`;
-
-    // relax progressively
     if (sample.length < 8) { sample = state.scores.filter(r=> r.gpu===gpu && r.region===reg0 && r.type===typ0 && r.duration===dur0); note="relaxed: drop count"; }
     if (sample.length < 8) { sample = state.scores.filter(r=> r.gpu===gpu && r.region===reg0 && r.type===typ0); note="relaxed: drop duration + count"; }
     if (sample.length < 8) { sample = state.scores.filter(r=> r.gpu===gpu && r.type===typ0); note="relaxed: drop region + duration + count"; }
     if (sample.length < 8) { sample = state.scores.filter(r=> r.gpu===gpu); note="relaxed: GPU only"; }
 
     const vals = sample.map(r=>r.price).filter(Number.isFinite).sort((a,b)=>a-b);
-    const [p10,p25,p50,p75,p90] = quantiles(vals,[0.10,0.25,0.50,0.75,0.90]);
-
     const money = n => isFinite(n) ? `$${n.toFixed(2)}` : "–";
+
+    // Quantiles
+    const q = (ps)=>{
+      const n=vals.length; if(!n) return ps.map(()=>NaN);
+      return ps.map(p=>{
+        if (n===1) return vals[0];
+        const idx=(n-1)*p, lo=Math.floor(idx), hi=Math.ceil(idx);
+        if (lo===hi) return vals[lo];
+        const w=idx-lo; return vals[lo]*(1-w)+vals[hi]*w;
+      });
+    };
+    const [p10,p25,p50,p75,p90] = q([0.10,0.25,0.50,0.75,0.90]);
+
     document.getElementById("bm_p10").textContent = money(p10);
     document.getElementById("bm_p25").textContent = money(p25);
     document.getElementById("bm_p50").textContent = money(p50);
     document.getElementById("bm_p75").textContent = money(p75);
     document.getElementById("bm_p90").textContent = money(p90);
     document.getElementById("bm_big").textContent = money(p50);
-    document.getElementById("bm_note").textContent = `Samples: ${vals.length} (${note})`;
+
+    // Confidence badge text (in bm_note)
+    let noteTxt = `Samples: ${vals.length} (${note})`;
+    let conf = "Low";
+    if (isFinite(p50) && isFinite(p25) && isFinite(p75) && vals.length){
+      const iqr = Math.max(0, p75 - p25);
+      const disp = iqr / Math.max(p50, 1e-9);
+      conf = (vals.length>=40 && disp<0.25) ? "High" :
+             (vals.length>=20 && disp<0.40) ? "Medium" : "Low";
+      noteTxt += ` · Confidence: ${conf}`;
+    }
+    document.getElementById("bm_note").textContent = noteTxt;
+
+    // Deal guidance vs cheapest observed in the sample
+    const dealEl = document.getElementById("bm_deal");
+    if (dealEl){
+      dealEl.style.display = "none";
+      dealEl.className = "badge";
+      if (vals.length && isFinite(p25) && isFinite(p75)){
+        const cheapest = vals[0];
+        if (cheapest < p25){
+          dealEl.textContent = "Deal (book now)";
+          dealEl.classList.add("ok");
+          dealEl.style.display = "inline-block";
+        } else if (cheapest > p75){
+          dealEl.textContent = "Rich (likely cheaper later)";
+          dealEl.classList.add("rich");
+          dealEl.style.display = "inline-block";
+        } else {
+          dealEl.textContent = "Fair";
+          dealEl.classList.add("warn");
+          dealEl.style.display = "inline-block";
+        }
+      }
+    }
 
     // KDE chart
+    const kde = (values, gridN=160)=>{
+      const n=values.length; if(!n) return {x:[],y:[]};
+      const mean = values.reduce((a,b)=>a+b,0)/n;
+      const s2 = values.reduce((a,b)=>a+(b-mean)**2,0)/Math.max(1,n-1);
+      const sd = Math.sqrt(Math.max(s2, 1e-9));
+      const h = 1.06*sd*Math.pow(n,-1/5);
+      const minV = Math.min(...values), maxV = Math.max(...values);
+      const pad = 0.15*(maxV-minV || 1);
+      const lo = minV - pad, hi = maxV + pad;
+      const x = Array.from({length:gridN},(_,i)=> lo + (i/(gridN-1))*(hi-lo));
+      const y = x.map(xi=>{
+        let s=0; for(const v of values){ const u=(xi-v)/h; s += Math.exp(-0.5*u*u); }
+        return s/(n*h*Math.sqrt(2*Math.PI));
+      });
+      const ymax = Math.max(...y, 1e-9);
+      return {x, y:y.map(d=>d/ymax)};
+    };
     const {x, y} = kde(vals);
     const ctx = document.getElementById("bm_chart").getContext("2d");
-    if (_bmChart) _bmChart.destroy();
-    _bmChart = new Chart(ctx,{
-      type:'line',
-      data:{ labels: x, datasets:[{label:'Normalized Price Distribution', data:y, fill:true, tension:0.35, pointRadius:0, borderWidth:2}]},
-      options:{
-        responsive:true,
-        plugins:{ legend:{display:true}},
-        scales:{
-          y:{ min:0, max:1, ticks:{ callback:v=>v.toFixed(1)}},
-          x:{ ticks:{ callback:(v)=>'$'+Number(x[v]).toFixed(2), autoSkip:true, maxRotation:0 } }
-        },
-        interaction:{ mode:'index', intersect:false }
-      }
-    });
+    if (window._bmChart) window._bmChart.destroy();
+    if (window.Chart){
+      window._bmChart = new Chart(ctx,{
+        type:'line',
+        data:{ labels: x, datasets:[{label:'Normalized Price Distribution', data:y, fill:true, tension:0.35, pointRadius:0, borderWidth:2}]},
+        options:{
+          responsive:true,
+          plugins:{ legend:{display:true}},
+          scales:{
+            y:{ min:0, max:1, ticks:{ callback:v=>v.toFixed(1)}},
+            x:{ ticks:{ callback:(v)=>'$'+Number(x[v]).toFixed(2), autoSkip:true, maxRotation:0 } }
+          },
+          interaction:{ mode:'index', intersect:false }
+        }
+      });
+    }
   }
 
   // ---------------------- FORECAST (72h) ----------------------
@@ -719,27 +543,29 @@
 
     const ctx = document.getElementById("fc_chart").getContext("2d");
     if (_fcChart) _fcChart.destroy();
-    // Band fill between p10 and p90 by stacking datasets
-    _fcChart = new Chart(ctx,{
-      type:'line',
-      data:{
-        labels,
-        datasets:[
-          {label:'P10', data:p10, pointRadius:0, borderWidth:1, tension:0.25, fill:false, hidden:true},
-          {label:'P10–P90 band', data:p90, pointRadius:0, borderWidth:0, tension:0.25, fill:{target:0},}, // fills down to dataset 0 (P10)
-          {label:'P50', data:p50, pointRadius:0, borderWidth:2, tension:0.25}
-        ]
-      },
-      options:{
-        responsive:true,
-        plugins:{ legend:{display:true}},
-        scales:{
-          y:{ ticks:{ callback:v=>"$"+Number(v).toFixed(2)}},
-          x:{ ticks:{ autoSkip:true, maxRotation:0 }}
+    if (window.Chart){
+      // Band fill between p10 and p90 by stacking datasets
+      _fcChart = new Chart(ctx,{
+        type:'line',
+        data:{
+          labels,
+          datasets:[
+            {label:'P10', data:p10, pointRadius:0, borderWidth:1, tension:0.25, fill:false, hidden:true},
+            {label:'P10–P90 band', data:p90, pointRadius:0, borderWidth:0, tension:0.25, fill:{target:0}}, // fills to dataset 0 (P10)
+            {label:'P50', data:p50, pointRadius:0, borderWidth:2, tension:0.25}
+          ]
         },
-        interaction:{ mode:'index', intersect:false }
-      }
-    });
+        options:{
+          responsive:true,
+          plugins:{ legend:{display:true}},
+          scales:{
+            y:{ ticks:{ callback:v=>"$"+Number(v).toFixed(2)}},
+            x:{ ticks:{ autoSkip:true, maxRotation:0 }}
+          },
+          interaction:{ mode:'index', intersect:false }
+        }
+      });
+    }
 
     metaEl.textContent = `${used.gpu} · ${used.region} · ${used.type} · ${used.duration} · ${used.count} GPUs` + (used.matched?"":" (showing available slice)");
     noteEl.textContent = `Points: ${rows.length}. Band shows P10–P90; line shows P50.`;
@@ -749,10 +575,6 @@
   loadAll();
 })();
 </script>
-</body>
-</html>
-
-
 
 
 

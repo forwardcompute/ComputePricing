@@ -32,24 +32,41 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # notebook + scraping deps (as before)
           pip install papermill jupyter ipykernel nest-asyncio aiohttp requests beautifulsoup4 lxml pandas numpy
+          # headless browser (if your notebook needs it)
           pip install playwright
           python -m playwright install --with-deps chromium
+          # kernel for papermill
           python -m ipykernel install --user --name python3
 
       - name: Build data (scrape + aggregate)
         run: |
           # Execute your single notebook; outputs land under docs/data/**
           papermill "scrape+formula.ipynb" "docs/last_run.ipynb" -k python3
-          echo "Listing derived outputs:"
+          echo "Listing derived outputs after scrape:"
           ls -lah docs/data || true
+          ls -lah docs/data/derived || true
+          ls -lah docs/data/history || true
+
+      - name: Train price bands from history (EWMA + bootstrap)
+        run: |
+          # Produces docs/data/derived/price_predict_snapshot.json and forecast.csv
+          python train_benchmark.py \
+            --gpu H100 --region Global --type "On-Demand" --duration "1h" --count 8 \
+            --history-root docs/data/history --out-root docs/data/derived --lookback-days 14 || echo "training step returned non-zero (continuing)"
+          echo "Forecast snapshot:"
+          cat docs/data/derived/price_predict_snapshot.json || true
+          echo "Derived after training:"
+          ls -lah docs/data/derived || true
 
       - name: Commit dashboard data (derived + history + latest)
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Price-IQ: update data (derived + history + latest)"
+          commit_message: "Price-IQ: update data (derived + history + latest + forecast)"
           file_pattern: |
             docs/data/**
             docs/last_run.ipynb
+
 
 

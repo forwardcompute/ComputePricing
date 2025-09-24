@@ -54,11 +54,10 @@
   .control label{font-size:11px;color:var(--sub);padding-left:2px}
   .barWrap{margin-top:6px;height:6px;background:rgba(255,255,255,0.05);border:1px solid var(--chipStroke);border-radius:999px;overflow:hidden}
   .bar{height:100%;background:linear-gradient(90deg, var(--accent), #89e1ff)}
+  /* ROI grid cells */
   .roiCell{background:var(--row);border:1px solid var(--muted);border-radius:12px;padding:10px;cursor:pointer}
   .roiCell h4{margin:0 0 6px 0;font-size:13px;color:var(--sub);font-weight:600}
-  .roiCell .prov{font-weight:700}
   .roiCell .total{font-size:18px;font-weight:800}
-  .gridHead{color:var(--sub);font-size:12px;margin:6px 0}
 </style>
 </head>
 <body>
@@ -145,7 +144,7 @@
         <div class="control"><label>&nbsp;</label><button id="roi_reset" class="btn clear">Reset</button></div>
       </div>
 
-      <div class="gridHead">Click a scenario to see Top-3</div>
+      <div class="small" style="color:var(--sub)">Click a scenario to see Top-3</div>
       <div id="roi_grid" class="row" style="gap:10px"></div>
 
       <div id="roi_details" class="card" style="margin-top:12px; display:none">
@@ -220,9 +219,18 @@
       <h3 style="margin:0">Forecast (next 72 hours)</h3>
       <span class="small">from <code>forecast.csv</code> · <span id="fcMeta"></span></span>
     </div>
-    <div class="card">
+    <div class="card" id="fcCard">
+      <div id="fcEmpty" class="small" style="margin-bottom:8px;color:var(--sub);display:none">
+        No <code>forecast.csv</code> found or no rows.
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
+          <input id="fcUpload" type="file" accept=".csv" class="select" style="max-width:260px" />
+          <button id="fcGen" class="btn">Generate simple 72h</button>
+          <button id="fcTpl" class="btn clear">CSV template</button>
+          <button id="fcTrainer" class="btn">Download ML trainer (LightGBM)</button>
+        </div>
+      </div>
       <div class="small" id="fcNote" style="margin-bottom:8px;color:var(--sub)"></div>
-      <canvas id="fc_chart" height="120"></canvas>
+      <canvas id="fc_chart" height="120" style="display:none"></canvas>
     </div>
 
     <!-- SNAPSHOT -->
@@ -354,28 +362,18 @@ window.addEventListener('DOMContentLoaded', () => {
         const hrs = durToHours(duration);
         const total = Number(r.total_cost_usd);
         const csvRate = Number(r.price_per_gpu_hr);
-        // derive rate from total when possible
         const derived = (isFinite(total) && isFinite(count) && count>0 && hrs>0)
           ? (total / (count * hrs))
           : NaN;
-        // if CSV rate exists but differs >1% from derived, trust derived
         let p_eff = isFinite(derived) ? derived : csvRate;
         if (isFinite(csvRate) && isFinite(derived)){
           const diff = Math.abs(csvRate - derived) / Math.max(derived,1e-9);
-          if (diff <= 0.01) p_eff = csvRate; // within 1%, keep csv
-          else p_eff = derived;               // else use derived (fix bad CSV)
+          p_eff = (diff <= 0.01) ? csvRate : derived;
         }
         return {
-          gpu,
-          count,
-          duration,
-          provider:r.best_provider,
-          region:r.best_region,
-          p_csv: csvRate,
-          p_eff,                // corrected $/GPU-hr to display/use
-          total,
-          hrs,
-          ts:r.timestamp
+          gpu, count, duration,
+          provider:r.best_provider, region:r.best_region,
+          p_csv: csvRate, p_eff, total, hrs, ts:r.timestamp
         };
       }).filter(r=>isFinite(r.total));
       logDbg(`rows(roi): ${state.roi.length}`);
@@ -406,8 +404,8 @@ window.addEventListener('DOMContentLoaded', () => {
     hydrateAll();
     initQuickCalc();
     initBenchmarkUI();
-    initROIImproved();       // <<< new
-    renderForecast();        // after benchmark init
+    initROIImproved();
+    renderForecast(); // after benchmark init
   }
 
   // ---------------------- FILTERS + KPI ----------------------
@@ -489,7 +487,6 @@ window.addEventListener('DOMContentLoaded', () => {
       ["kpi_low_sub","kpi_med_sub"].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=""; });
     }
 
-    // Leaderboard
     const lbBody = document.querySelector("#tbl_leader tbody");
     if (lbBody){
       lbBody.innerHTML = rows.map(r=>`
@@ -504,7 +501,6 @@ window.addEventListener('DOMContentLoaded', () => {
         </tr>`).join("");
     }
 
-    // Snapshot
     const cbody=document.querySelector("#tbl_comp tbody");
     if (cbody){
       cbody.innerHTML = state.snap.map(r=>{
@@ -528,7 +524,6 @@ window.addEventListener('DOMContentLoaded', () => {
       }).join("");
     }
 
-    // Pred tiles from snapshot
     const pp = state.predict||{};
     const moneyOrDash = v => (v==null||isNaN(v)) ? "–" : `$${Number(v).toFixed(2)}`;
     const set = (id,txt)=>{ const el=document.getElementById(id); if(el) el.textContent=txt; };
@@ -577,9 +572,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const hrs  = durToHours(qc_dur.value);
     const usePred = !!document.getElementById("qc_usePred")?.checked;
 
-    // Primary: exact region
     let rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && /On-Demand/i.test(r.type));
-    // Fallback to any region
     if (!rows.length){
       const any = state.scores.find(r=> r.gpu===gpu && /On-Demand/i.test(r.type));
       if (any){
@@ -618,7 +611,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ---------------------- PRICE BENCHMARK (same as before) ----------------------
+  // ---------------------- PRICE BENCHMARK ----------------------
   function setOptionsPlain(el, arr){ if(el) el.innerHTML = arr.map(v=>`<option>${v}</option>`).join(""); }
   function kde(values, gridN=160){
     const n=values.length; if(!n) return {x:[], y:[]};
@@ -760,32 +753,206 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ---------------------- FORECAST ----------------------
+  // ---------------------- FORECAST (upload/generate/trainer) ----------------------
+  function csvFromRows(rows){
+    const header = ["gpu_model","region","type","duration","gpu_count","date_utc","p10","p25","p50","p75","p90"];
+    const lines = [header.join(",")].concat(rows.map(r=>[
+      r.gpu,r.region,r.type,r.duration,r.count,r.date,
+      r.p10.toFixed(2),r.p25.toFixed(2),r.p50.toFixed(2),r.p75.toFixed(2),r.p90.toFixed(2)
+    ].join(",")));
+    return lines.join("\n");
+  }
+  function downloadText(name, text, mime="text/plain"){
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:mime}));
+    a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  function bindForecastUX(){
+    const elEmpty = document.getElementById("fcEmpty");
+    const elChart = document.getElementById("fc_chart");
+    const elUpload= document.getElementById("fcUpload");
+    const elGen   = document.getElementById("fcGen");
+    const elTpl   = document.getElementById("fcTpl");
+    const elTrainer = document.getElementById("fcTrainer");
+
+    if (elUpload){
+      elUpload.onchange = async (e)=>{
+        const f = e.target.files?.[0]; if(!f) return;
+        const txt = await f.text();
+        const rows = parseCSV(txt).map(r=>({
+          gpu:r.gpu_model, region:r.region, type:r.type, duration:r.duration, count:Number(r.gpu_count||0),
+          date:r.date_utc || r.date || r.ts,
+          p10:Number(r.p10), p25:Number(r.p25), p50:Number(r.p50), p75:Number(r.p75), p90:Number(r.p90)
+        })).filter(r=>r.date && isFinite(r.p50));
+        state.forecast = rows;
+        elEmpty.style.display = "none";
+        elChart.style.display = "block";
+        renderForecast();
+      };
+    }
+
+    if (elGen){
+      elGen.onclick = ()=>{
+        const gpu  = document.getElementById("bm_gpu")?.value || "H100";
+        const reg  = document.getElementById("bm_region")?.value || "Global";
+        const typ  = document.getElementById("bm_type")?.value || "On-Demand";
+        const dur  = document.getElementById("bm_duration")?.value || "1 hour";
+        const cnt  = Number(document.getElementById("bm_count")?.value || 8);
+
+        const getN = id => Number((document.getElementById(id)?.textContent||"").replace(/[^0-9.]/g,"")) || NaN;
+        const p10 = getN("bm_p10"), p25=getN("bm_p25"), p50=getN("bm_p50"), p75=getN("bm_p75"), p90=getN("bm_p90");
+
+        const base50 = isFinite(p50)?p50: (state.scores.map(r=>r.price).sort((a,b)=>a-b)[Math.floor(state.scores.length/2)]||1);
+        const base10 = isFinite(p10)?p10: base50*0.85, base25=isFinite(p25)?p25: base50*0.92, base75=isFinite(p75)?p75: base50*1.08, base90=isFinite(p90)?p90: base50*1.15;
+
+        const now = new Date();
+        const rows = [];
+        for(let h=1; h<=72; h++){
+          const d = new Date(now.getTime() + h*3600*1000);
+          const sin = Math.sin((h/24)*Math.PI*2);
+          const drift = 1 + 0.02 * (h/72 - 0.5);
+          const jitter = (v)=> (v * drift * (1 + 0.01*sin));
+          rows.push({ gpu:gpu, region:reg, type:typ, duration:dur, count:cnt,
+            date:d.toISOString(), p10:jitter(base10), p25:jitter(base25), p50:jitter(base50), p75:jitter(base75), p90:jitter(base90) });
+        }
+        state.forecast = rows;
+        document.getElementById("fcEmpty").style.display = "none";
+        document.getElementById("fc_chart").style.display = "block";
+        renderForecast();
+      };
+    }
+
+    if (elTpl){
+      elTpl.onclick = ()=>{
+        const gpu  = document.getElementById("bm_gpu")?.value || "H100";
+        const reg  = document.getElementById("bm_region")?.value || "Global";
+        const typ  = document.getElementById("bm_type")?.value || "On-Demand";
+        const dur  = document.getElementById("bm_duration")?.value || "1 hour";
+        const cnt  = Number(document.getElementById("bm_count")?.value || 8);
+
+        const now = new Date();
+        const sample = [];
+        for(let h=1; h<=3; h++){
+          const d = new Date(now.getTime() + h*3600*1000);
+          sample.push({gpu, region:reg, type:typ, duration:dur, count:cnt, date:d.toISOString(),
+            p10:1.00, p25:1.10, p50:1.20, p75:1.30, p90:1.40});
+        }
+        downloadText("forecast_template.csv", csvFromRows(sample), "text/csv");
+      };
+    }
+
+    if (elTrainer){
+      elTrainer.onclick = ()=> downloadText("train_forecast.py", TRAINER_PY, "text/x-python");
+    }
+  }
+
+  // Trainer script content (LightGBM quantile). Downloaded when user clicks button.
+  const TRAINER_PY = `# -*- coding: utf-8 -*-
+# Train quantile LightGBM to produce data/derived/forecast.csv for Price-IQ
+# Usage (venv recommended):
+#   pip install pandas numpy lightgbm
+#   python train_forecast.py
+import pandas as pd, numpy as np, lightgbm as lgb
+from pathlib import Path
+
+DERIVED = Path("data/derived")
+HIST = DERIVED/"provider_scores_history.csv"  # <-- put your historical quotes here
+OUT  = DERIVED/"forecast.csv"
+
+def load_history():
+    df = pd.read_csv(HIST, parse_dates=["timestamp"])
+    df = df.rename(columns={"gpu_model":"gpu","effective_price_usd_per_gpu_hr":"price"})
+    df = df.sort_values("timestamp")
+    # create slice id
+    df["slice"] = df[["gpu","region","type","duration"]].agg("|".join, axis=1)
+    return df
+
+def add_features(df):
+    df["hour"] = df["timestamp"].dt.hour
+    df["dow"]  = df["timestamp"].dt.dayofweek
+    def _lags(g):
+        for k in [1,24,168]:
+            g[f"lag_{k}"] = g["price"].shift(k)
+        for w in [6,24,72,168]:
+            g[f"roll_mean_{w}"] = g["price"].rolling(w, min_periods=3).mean()
+            g[f"roll_std_{w}"]  = g["price"].rolling(w, min_periods=3).std()
+        return g
+    return df.groupby("slice", group_keys=False).apply(_lags)
+
+def fit_quantile(train, valid, feats, alpha):
+    params = dict(objective="quantile", alpha=alpha, learning_rate=0.05,
+                  num_leaves=64, feature_fraction=0.9, bagging_fraction=0.8, bagging_freq=1)
+    dtrain = lgb.Dataset(train[feats], label=train["price"])
+    dvalid = lgb.Dataset(valid[feats], label=valid["price"])
+    return lgb.train(params, dtrain, num_boost_round=600, valid_sets=[dvalid],
+                     callbacks=[lgb.early_stopping(60, verbose=False)])
+
+def future_design(df_slice, feats, models, horizon=72):
+    # roll forward using median predictions for lags
+    hist = df_slice.copy().sort_values("timestamp").tail(168+72).dropna()
+    rows = []
+    last_ts = hist["timestamp"].max()
+    for i in range(1, horizon+1):
+        t = last_ts + pd.Timedelta(hours=i)
+        row = {"timestamp":t, "hour":t.hour, "dow":t.dayofweek}
+        def lag(gap):
+            return hist.iloc[-gap]["price"] if len(hist)>=gap else np.nan
+        for k in [1,24,168]:
+            row[f"lag_{k}"] = lag(k)
+        for w in [6,24,72,168]:
+            tail = hist["price"].tail(w)
+            row[f"roll_mean_{w}"] = tail.mean()
+            row[f"roll_std_{w}"]  = tail.std()
+        X = pd.DataFrame([row])
+        mid = models[0.5].predict(X[feats])[0]
+        rows.append((row, mid))
+        hist = pd.concat([hist, pd.DataFrame([{"timestamp":t, "price":mid}])], ignore_index=True)
+    Xf = pd.DataFrame([r for r,_ in rows])
+    return Xf
+
+def main():
+    df = load_history()
+    df = add_features(df).dropna()
+    feats = [c for c in df.columns if c not in ["timestamp","price","slice","gpu","region","type","duration","gpu_count"]]
+    cut = df["timestamp"].quantile(0.85)
+    train, valid = df[df["timestamp"]<=cut], df[df["timestamp"]>cut]
+    models = {q: fit_quantile(train, valid, feats, q) for q in [0.1,0.25,0.5,0.75,0.9]}
+
+    out_rows = []
+    for slc, g in df.groupby("slice"):
+        gpu, region, typ, dur = slc.split("|")
+        # prepare future design
+        Xf = future_design(g[["timestamp","price"]+feats], feats, models, 72)
+        preds = {q: models[q].predict(Xf[feats]) for q in [0.1,0.25,0.5,0.75,0.9]}
+        stack = np.sort(np.vstack([preds[0.1], preds[0.25], preds[0.5], preds[0.75], preds[0.9]]).T, axis=1)
+        ts = pd.date_range(df["timestamp"].max()+pd.Timedelta(hours=1), periods=72, freq="H")
+        for i,t in enumerate(ts):
+            out_rows.append(dict(
+                gpu_model=gpu, region=region, type=typ, duration=dur, gpu_count=8,
+                date_utc=t.tz_localize("UTC").isoformat(),
+                p10=stack[i,0], p25=stack[i,1], p50=stack[i,2], p75=stack[i,3], p90=stack[i,4]
+            ))
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(out_rows).to_csv(OUT, index=False)
+    print(f"Wrote {OUT} with {len(out_rows)} rows.")
+
+if __name__ == "__main__":
+    main()
+`;
+
+  // original renderer; wrapped to show empty-state controls
   let _fcChart;
-  function renderForecast(){
+  function renderForecastInner(){
     const fc = state.forecast||[];
     const noteEl = document.getElementById("fcNote");
     const metaEl = document.getElementById("fcMeta");
+    const canvas = document.getElementById("fc_chart");
     if (!fc.length){
       if (noteEl) noteEl.textContent = "No forecast.csv found or no rows. Add it via the training step.";
-      if (_fcChart){ _fcChart.destroy(); _fcChart=null; }
       return;
     }
-
-    const gpuSel = document.getElementById("bm_gpu")?.value;
-    const regSel = document.getElementById("bm_region")?.value;
-    const typSel = document.getElementById("bm_type")?.value;
-    const durSel = document.getElementById("bm_duration")?.value;
-    const cntSel = Number(document.getElementById("bm_count")?.value);
-
-    let rows = fc.filter(r=> r.gpu===gpuSel && r.region===regSel && r.type===typSel && r.duration===durSel && r.count===cntSel);
-    let used = {gpu:gpuSel, region:regSel, type:typSel, duration:durSel, count:cntSel, matched:true};
-    if (!rows.length){
-      rows = fc.slice();
-      used = {gpu:fc[0].gpu, region:fc[0].region, type:fc[0].type, duration:fc[0].duration, count:fc[0].count, matched:false};
-    }
-    rows.sort((a,b)=> new Date(a.date) - new Date(b.date));
-
+    // Choose slice from first row (or match controls if you want)
+    const rows = [...fc].sort((a,b)=> new Date(a.date) - new Date(b.date));
     const labels = rows.map(r=>{
       const d = new Date(r.date);
       const mm = d.toLocaleString(undefined,{month:'short'});
@@ -793,49 +960,56 @@ window.addEventListener('DOMContentLoaded', () => {
       const hh = String(d.getHours()).padStart(2,'0');
       return `${mm} ${dd} ${hh}:00`;
     });
-    const p10 = rows.map(r=>r.p10);
-    const p50 = rows.map(r=>r.p50);
-    const p90 = rows.map(r=>r.p90);
+    const p10 = rows.map(r=>Number(r.p10));
+    const p50 = rows.map(r=>Number(r.p50));
+    const p90 = rows.map(r=>Number(r.p90));
 
-    const canvas = document.getElementById("fc_chart");
-    if (!canvas || !window.Chart) return;
+    if (metaEl){
+      const u = rows[0]||{};
+      metaEl.textContent = `${u.gpu||u.gpu_model||"–"} · ${u.region||"–"} · ${u.type||"–"} · ${u.duration||"–"} · ${u.count||u.gpu_count||"–"} GPUs`;
+    }
+    if (noteEl) noteEl.textContent = `Points: ${rows.length}. Band shows P10–P90; line shows P50.`;
+
+    if (!window.Chart || !canvas) return;
     const ctx = canvas.getContext("2d");
     if (_fcChart) _fcChart.destroy();
-
     _fcChart = new Chart(ctx,{
       type:'line',
-      data:{
-        labels,
+      data:{ labels,
         datasets:[
           {label:'P10', data:p10, pointRadius:0, borderWidth:1, tension:0.25, fill:false, hidden:true},
           {label:'P10–P90 band', data:p90, pointRadius:0, borderWidth:0, tension:0.25, fill:{target:0}},
           {label:'P50', data:p50, pointRadius:0, borderWidth:2, tension:0.25}
-        ]
-      },
-      options:{
-        responsive:true,
-        plugins:{ legend:{display:true}},
-        scales:{
-          y:{ ticks:{ callback:v=>"$"+Number(v).toFixed(2)}},
-          x:{ ticks:{ autoSkip:true, maxRotation:0 }}
-        },
+        ]},
+      options:{ responsive:true, plugins:{ legend:{display:true}},
+        scales:{ y:{ ticks:{ callback:v=>"$"+Number(v).toFixed(2)}}, x:{ ticks:{ autoSkip:true, maxRotation:0 }}},
         interaction:{ mode:'index', intersect:false }
       }
     });
-
-    if (metaEl) metaEl.textContent = `${used.gpu} · ${used.region} · ${used.type} · ${used.duration} · ${used.count} GPUs` + (used.matched?"":" (showing available slice)");
-    if (noteEl) noteEl.textContent = `Points: ${rows.length}. Band shows P10–P90; line shows P50.`;
   }
 
-  // ---------------------- ROI (IMPROVED GRID) ----------------------
+  function renderForecast(){
+    const fc = state.forecast||[];
+    const empty  = document.getElementById("fcEmpty");
+    const canvas = document.getElementById("fc_chart");
+    if (!fc.length){
+      if (empty) empty.style.display = "block";
+      if (canvas) canvas.style.display = "none";
+      bindForecastUX();
+      return;
+    }
+    if (empty) empty.style.display = "none";
+    if (canvas) canvas.style.display = "block";
+    renderForecastInner();
+  }
+
+  // ---------------------- ROI (grid) ----------------------
   const DUR_ORDER = ["1 hour","1 day","1 week","1 month"];
   const COUNT_ORDER = [8,16,32,64];
-
   function fmtMoney0(n){ return isFinite(n) ? `$${Number(n).toFixed(0)}` : "–"; }
   function fmtRate2(n){  return isFinite(n) ? `$${Number(n).toFixed(2)}` : "–"; }
 
   function buildBestByScenario(rows, metric){
-    // metric: "total" | "rate"
     const key = r => [r.gpu, r.region, r.count, r.duration].join("|");
     const best = new Map();
     for (const r of rows){
@@ -893,39 +1067,32 @@ window.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // grid: first column labels + one column per count
       gridEl.style.display = "grid";
       gridEl.style.gridTemplateColumns = `160px ${counts.map(()=> "1fr").join(" ")}`;
-      // header row
       let html = `<div></div>${counts.map(c=>`<div class="small" style="color:var(--sub);font-weight:600">Count: ${c}</div>`).join("")}`;
-      // rows
       for (const d of durations){
         html += `<div class="small" style="color:var(--sub);font-weight:600">${d}</div>`;
         for (const c of counts){
           const cell = best.find(r=> r.duration===d && r.count===c);
           if (!cell){
-            html += `<div class="roiCell" style="opacity:0.5"><div class="sub">–</div></div>`;
+            html += `<div class="roiCell" style="opacity:0.5"><div class="small">–</div></div>`;
             continue;
           }
-          const totalTxt = fmtMoney0(cell.total);
-          const rateTxt  = fmtRate2(cell.p_eff);
           html += `<div class="roiCell" data-gpu="${cell.gpu}" data-region="${cell.region}" data-count="${c}" data-duration="${d}">
             <h4>${cell.provider} <span class="small" style="color:var(--sub)">· ${cell.region}</span></h4>
-            <div class="total">${totalTxt}</div>
-            <div class="small" style="color:var(--sub)">${rateTxt} / GPU-hr</div>
+            <div class="total">${fmtMoney0(cell.total)}</div>
+            <div class="small" style="color:var(--sub)">${fmtRate2(cell.p_eff)} / GPU-hr</div>
           </div>`;
         }
       }
       gridEl.innerHTML = html;
 
-      // cell clicks -> show top-3
       gridEl.querySelectorAll('.roiCell').forEach(div=>{
         div.addEventListener('click', ()=>{
           const d = div.getAttribute('data-duration');
           const c = Number(div.getAttribute('data-count'));
           const reg = div.getAttribute('data-region');
           const slice = rows.filter(r=> r.duration===d && r.count===c && r.region===reg);
-          // sort by metric
           slice.sort((a,b)=> (metric==="rate" ? a.p_eff - b.p_eff : a.total - b.total));
           const top = slice.slice(0,3);
           if (detTitle) detTitle.textContent = `Top options — ${gpu}, ${c} GPUs, ${d}`;
@@ -965,6 +1132,7 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
+
 
 
 

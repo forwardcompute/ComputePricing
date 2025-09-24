@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Price-IQ</title>
 <link rel="icon" href="data:,">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
   :root{
     --bg:#0f1216; --panel:#171b21; --muted:#202532; --text:#e7edf3; --sub:#9fb0c3;
@@ -25,8 +26,6 @@
   @media (max-width:980px){ .hero{grid-template-columns:1fr 1fr} .tileRow{grid-template-columns:1fr 1fr}}
   .card{background:var(--panel);border:1px solid var(--muted);border-radius:14px;padding:12px}
   .select, .btn, .inp{width:100%;appearance:none;background:var(--chip);border:1px solid var(--chipStroke);color:var(--text);padding:10px 12px;border-radius:10px}
-  .select{padding-right:36px;background-image:linear-gradient(45deg,transparent 50%,var(--sub) 50%),linear-gradient(135deg,var(--sub) 50%,transparent 50%),linear-gradient(to right,transparent,transparent);
-          background-position:calc(100% - 18px) 16px,calc(100% - 12px) 16px,100% 0;background-size:6px 6px,6px 6px,2.5em 2.5em;background-repeat:no-repeat}
   .btn{cursor:pointer}
   .btn.clear{background:#1d2430;border-color:#2a3244}
   .stat{display:flex;flex-direction:column;gap:6px}
@@ -70,442 +69,53 @@
 
     <!-- KPI TILES -->
     <div class="row tileRow" style="margin-top:12px">
-      <div class="card stat">
-        <h4>Cheapest / GPU-hr</h4>
-        <div class="val" id="kpi_low">–</div>
-        <div class="sub" id="kpi_low_sub"> </div>
-      </div>
-      <div class="card stat">
-        <h4>Median / GPU-hr</h4>
-        <div class="val" id="kpi_med">–</div>
-        <div class="sub" id="kpi_med_sub"> </div>
-      </div>
-      <div class="card stat">
-        <h4>Providers covered</h4>
-        <div class="val" id="kpi_prov">–</div>
-        <div class="sub" id="kpi_prov_sub">Unique provider names in current filter.</div>
-      </div>
-      <div class="card stat">
-        <h4>Entries</h4>
-        <div class="val" id="kpi_rows">0</div>
-        <div class="sub">Rows displayed in leaderboard.</div>
-      </div>
-    </div>
-
-    <!-- DATA STATUS (hidden by default; use the toggle to show) -->
-    <div class="sectionTitle" style="margin-top:18px">
-      <div class="switch small">
-        <input type="checkbox" id="toggleDebug">
-        <label for="toggleDebug">Show data status (debug)</label>
-      </div>
-    </div>
-    <div class="card debug" id="debugPanel">
-      <div id="debugLines" class="small"></div>
+      <div class="card stat"><h4>Cheapest / GPU-hr</h4><div class="val" id="kpi_low">–</div><div class="sub" id="kpi_low_sub"></div></div>
+      <div class="card stat"><h4>Median / GPU-hr</h4><div class="val" id="kpi_med">–</div><div class="sub" id="kpi_med_sub"></div></div>
+      <div class="card stat"><h4>Providers covered</h4><div class="val" id="kpi_prov">–</div><div class="sub" id="kpi_prov_sub"></div></div>
+      <div class="card stat"><h4>Entries</h4><div class="val" id="kpi_rows">0</div><div class="sub">Rows displayed in leaderboard.</div></div>
     </div>
 
     <!-- LEADERBOARD -->
-    <div class="sectionTitle">
-      <h3 style="margin:0">Leaderboard (Price-IQ)</h3>
-      <span class="small" id="lbSort">Sorted by price ↑</span>
-    </div>
-    <div class="card">
-      <table id="tbl_leader">
-        <thead>
-          <tr>
-            <th>Provider</th><th>Region</th><th>GPU</th><th>Type</th>
-            <th>Duration</th><th>Count</th>
-            <th class="right">$/GPU-hr</th><th class="right">Score</th><th class="right">Timestamp</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
+    <div class="sectionTitle"><h3 style="margin:0">Leaderboard (Price-IQ)</h3><span class="small" id="lbSort">Sorted by price ↑</span></div>
+    <div class="card"><table id="tbl_leader"><thead><tr><th>Provider</th><th>Region</th><th>GPU</th><th>Type</th><th>Duration</th><th>Count</th><th class="right">$/GPU-hr</th><th class="right">Score</th><th class="right">Timestamp</th></tr></thead><tbody></tbody></table></div>
 
-    <!-- ROI: Cheapest total cost -->
-    <div class="sectionTitle">
-      <h3 style="margin:0">ROI (Cheapest total cost)</h3>
-      <span class="small">from <code>roi_comparison.csv</code></span>
-    </div>
-    <div class="card">
-      <table id="tbl_roi">
-        <thead>
-          <tr>
-            <th>GPU</th><th>Count</th><th>Duration</th><th>Provider</th>
-            <th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th><th class="right">When</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
+    <!-- ROI -->
+    <div class="sectionTitle"><h3 style="margin:0">ROI (Cheapest total cost)</h3><span class="small">from <code>roi_comparison.csv</code></span></div>
+    <div class="card"><table id="tbl_roi"><thead><tr><th>GPU</th><th>Count</th><th>Duration</th><th>Provider</th><th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th><th class="right">When</th></tr></thead><tbody></tbody></table></div>
 
     <!-- QUICK CALC -->
-    <div class="sectionTitle">
-      <h3 style="margin:0">ROI Calculator (quick)</h3>
-    </div>
-    <div class="card">
-      <div class="controls" style="flex-wrap:wrap;margin-bottom:10px">
-        <select id="qc_gpu"   class="select" style="min-width:160px"></select>
-        <select id="qc_region"class="select" style="min-width:160px"></select>
-        <select id="qc_count" class="select" style="min-width:120px"></select>
-        <select id="qc_dur"   class="select" style="min-width:160px"></select>
-        <label class="switch small"><input type="checkbox" id="qc_usePred"> Use predictions (P50) if available</label>
-        <button class="btn" id="btnCalc">Calculate</button>
-      </div>
-      <table id="tbl_qc">
-        <thead>
-          <tr>
-            <th>Provider</th><th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th><th class="right">Source</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <div class="row tileRow" style="margin-top:12px">
-        <div class="card stat"><h4>Predicted price (P10)</h4><div class="val" id="p10">–</div></div>
-        <div class="card stat"><h4>Predicted price (P25)</h4><div class="val" id="p25">–</div></div>
-        <div class="card stat"><h4>Predicted price (P50)</h4><div class="val" id="p50">–</div></div>
-        <div class="card stat"><h4>Predicted price (P75 / P90)</h4><div class="val" id="p7590">– / –</div></div>
-      </div>
-    </div>
+    <div class="sectionTitle"><h3 style="margin:0">ROI Calculator (quick)</h3></div>
+    <div class="card"><div class="controls" style="flex-wrap:wrap;margin-bottom:10px"><select id="qc_gpu" class="select"></select><select id="qc_region" class="select"></select><select id="qc_count" class="select"></select><select id="qc_dur" class="select"></select><label class="switch small"><input type="checkbox" id="qc_usePred"> Use predictions (P50)</label><button class="btn" id="btnCalc">Calculate</button></div><table id="tbl_qc"><thead><tr><th>Provider</th><th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th><th class="right">Source</th></tr></thead><tbody></tbody></table></div>
 
-    <!-- COMPUTE CALC SNAPSHOT -->
-    <div class="sectionTitle">
-      <h3 style="margin:0">Compute Calculator Snapshot</h3>
-      <span class="small">from <code>compute_calculator_snapshot.csv</code></span>
-    </div>
-    <div class="card">
-      <table id="tbl_comp">
-        <thead>
-          <tr>
-            <th>GPU</th><th>Provider type</th><th>$ / GPU-hr</th><th>TOTAL (term)</th>
-            <th class="right">lo</th><th class="right">md</th><th class="right">hi</th>
-            <th class="right">term hrs</th><th class="right">GPUs</th><th>Region</th><th class="right">#quotes</th><th>Source</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
+    <!-- FORECAST -->
+    <div class="sectionTitle"><h3 style="margin:0">Forecast (30 days)</h3><span class="small">from <code>forecast.csv</code></span></div>
+    <div class="card"><canvas id="forecastChart" height="120"></canvas></div>
 
-    <p class="small" style="margin:16px 4px 40px">
-      Tip: data loads from <code>docs/data/derived/*.csv</code>. If a section is empty, check your CI run & artifact paths.
-    </p>
+    <p class="small" style="margin:16px 4px 40px">Tip: data loads from <code>docs/data/derived/*.csv</code>.</p>
   </div>
 
 <script>
 (function(){
-  // ------- Utils -------
-  const fmt = {
-    money:n=> n==null||isNaN(n) ? '–' : `$${Number(n).toFixed(2)}`,
-    money0:n=> n==null||isNaN(n) ? '–' : `$${Number(n).toFixed(0)}`,
-    num:n  => n==null||isNaN(n) ? '–' : Number(n).toLocaleString(),
-    date:s => s? String(s).replace('T',' ').replace('Z',''): '–'
-  };
-  const toHours = s=>{
-    if(!s) return NaN; s=String(s).toLowerCase().trim();
-    const m=s.match(/^(\d+(?:\.\d+)?)\s*([a-z]+)$/); if(!m) return NaN;
-    const q=parseFloat(m[1]), u=m[2];
-    const mult={h:1,hr:1,hour:1,d:24,day:24,w:168,wk:168,week:168,mo:720,month:720}[u] ?? NaN;
-    return q*mult;
-  };
-  const parseCSV=(txt)=>{
-    const lines=txt.trim().split(/\r?\n/);
-    const cols=lines.shift().split(",").map(h=>h.trim());
-    return lines.map(line=>{
-      // very light parser (no embedded commas in our files)
-      const cells=line.split(",").map(s=>s.trim());
-      const obj={}; cols.forEach((c,i)=>obj[c]=cells[i]??"");
-      return obj;
-    });
-  };
-  const uniq = arr => [...new Set(arr)];
-  const byNumAsc = key => (a,b)=> (+a[key]||1e9)-(+b[key]||1e9);
-  const byNumDesc= key => (a,b)=> (+b[key]||-1e9)-(+a[key]||-1e9);
+  const fmt={money:n=>n==null||isNaN(n)?'–':`$${Number(n).toFixed(2)}`,date:s=>s?String(s).replace('T',' ').replace('Z',''):'–'};
+  const parseCSV=txt=>{const lines=txt.trim().split(/\r?\n/);const cols=lines.shift().split(",");return lines.map(l=>{const c=l.split(",");const o={};cols.forEach((h,i)=>o[h]=c[i]);return o;});};
+  async function get(path){const res=await fetch("docs/data/derived/"+path,{cache:"no-store"});if(!res.ok)throw new Error(res.status);return res;}
 
-  // ------- Data paths -------
-  const PATHS_PRIMARY = "docs/data/derived/";
-  const PATHS_FALLBACK = "data/derived/";
-  const files = {
-    scores : "provider_scores_latest.csv",
-    roi    : "roi_comparison.csv",
-    predict: "price_predict_snapshot.json",
-    snap   : "compute_calculator_snapshot.csv",
-    market : "market_index.csv"
-  };
-  let basePath = PATHS_PRIMARY;
-
-  async function tryFetch(path){
-    const res = await fetch(path, {cache:"no-store"});
-    if(!res.ok) throw new Error(res.status);
-    return res;
-  }
-  async function get(path){
-    try { return await tryFetch(PATHS_PRIMARY + path); }
-    catch { basePath = PATHS_FALLBACK; return await tryFetch(PATHS_FALLBACK + path); }
-  }
-
-  // ------- Load all -------
-  const state = {
-    scores:[], roi:[], predict:null, snap:[], market:[],
-    filters: {gpu:"All", region:"All", type:"On-Demand", duration:"All", count:"All"}
-  };
-
-  function numify(x){
-    if(x==null) return NaN;
-    return Number(String(x).replace(/[^\d.\-]/g,""));
-  }
-
-  function safeGet(obj, path, def=null){
+  async function loadForecast(){
     try{
-      return path.split(".").reduce((o,k)=>o && (k in o)? o[k] : null, obj) ?? def;
-    }catch{ return def; }
+      const res=await get("forecast.csv");const txt=await res.text();const rows=parseCSV(txt);
+      const f=rows.filter(r=>r.provider==="vastai"&&r.gpu_model==="H100"&&r.type==="On-Demand"&&r.duration==="1h");
+      if(!f.length)return;
+      const labels=f.map(r=>r.date),preds=f.map(r=>+r.pred),lo=f.map(r=>+r.pred_lo),hi=f.map(r=>+r.pred_hi);
+      new Chart(document.getElementById("forecastChart"),{type:'line',data:{labels,datasets:[{label:"Forecast",data:preds,borderColor:"#60a5fa"},{label:"Lower",data:lo,borderColor:"#9ca3af",borderDash:[5,5]},{label:"Upper",data:hi,borderColor:"#9ca3af",borderDash:[5,5]}]},options:{responsive:true,plugins:{legend:{display:true}},scales:{x:{},y:{}}}});
+    }catch(e){console.log("⚠️ forecast.csv missing",e);}
   }
 
-  async function loadAll(){
-    const debug = [];
-    // provider scores
-    try{
-      const txt = await (await get(files.scores)).text();
-      const rows = parseCSV(txt).map(r=>({
-        provider:r.provider, region:r.region, gpu:r.gpu_model, type:r.type, duration:r.duration,
-        count: r.gpu_count ? Number(r.gpu_count) : null,
-        price: numify(r.effective_price_usd_per_gpu_hr),
-        score: r.priceiq_score ? Number(r.priceiq_score) : null,
-        ts: r.timestamp
-      })).filter(r=>isFinite(r.price));
-      state.scores = rows;
-      debug.push(`✅ Loaded ${files.scores} (${rows.length} rows)`);
-    }catch(e){ debug.push(`⚠️ Failed ${files.scores}`); }
-
-    // roi
-    try{
-      const txt = await (await get(files.roi)).text();
-      const rows = parseCSV(txt).map(r=>({
-        gpu:r.gpu_model, count:Number(r.gpu_count), duration:r.duration,
-        provider:r.best_provider, region:r.best_region,
-        p: Number(r.price_per_gpu_hr), total:Number(r.total_cost_usd), ts:r.timestamp
-      }));
-      state.roi = rows;
-      debug.push(`✅ Loaded ${files.roi} (${rows.length} rows)`);
-    }catch(e){ debug.push(`⚠️ Failed ${files.roi}`); }
-
-    // predict
-    try{
-      state.predict = await (await get(files.predict)).json();
-      debug.push(`✅ Loaded ${files.predict}`);
-    }catch(e){ debug.push(`⚠️ Failed ${files.predict}`); }
-
-    // snapshot
-    try{
-      const txt = await (await get(files.snap)).text();
-      const rows = parseCSV(txt);
-      state.snap = rows;
-      debug.push(`✅ Loaded ${files.snap} (${rows.length} rows)`);
-    }catch(e){ debug.push(`⚠️ Failed ${files.snap}`); }
-
-    // market (optional)
-    try{
-      const txt = await (await get(files.market)).text();
-      const rows = parseCSV(txt);
-      state.market = rows;
-      debug.push(`✅ Loaded ${files.market} (${rows.length} rows)`);
-    }catch(e){ debug.push(`ℹ️ Skipped ${files.market}`); }
-
-    document.getElementById("debugLines").innerHTML = debug.map(s=>`<div>${s}</div>`).join("");
-
-    initFilters();
-    hydrateAll();
-  }
-
-  // ------- Filters -------
-  function setOptions(el, arr, withAll=true){
-    el.innerHTML = "";
-    const vals = withAll? ["All",...arr]: arr;
-    for(const v of vals){
-      const opt = document.createElement("option");
-      opt.value=v; opt.textContent=v;
-      el.appendChild(opt);
-    }
-  }
-
-  function initFilters(){
-    const gpuSel     = document.getElementById("f_gpu");
-    const regionSel  = document.getElementById("f_region");
-    const typeSel    = document.getElementById("f_type");
-    const durSel     = document.getElementById("f_duration");
-    const countSel   = document.getElementById("f_count");
-
-    setOptions(gpuSel,    uniq(state.scores.map(r=>r.gpu)).sort());
-    setOptions(regionSel, uniq(state.scores.map(r=>r.region)).sort());
-    setOptions(typeSel,   uniq(state.scores.map(r=>r.type)).sort());
-    setOptions(durSel,    uniq(state.scores.map(r=>r.duration)).sort());
-    setOptions(countSel,  uniq(state.scores.map(r=>r.count).filter(Boolean)).sort((a,b)=>a-b));
-
-    gpuSel.value = "All"; regionSel.value="All"; typeSel.value="On-Demand"; durSel.value="All"; countSel.value="All";
-    for(const [el,key] of [[gpuSel,"gpu"],[regionSel,"region"],[typeSel,"type"],[durSel,"duration"],[countSel,"count"]]){
-      el.addEventListener("change", ()=>{ state.filters[key]=el.value; hydrateAll(); });
-    }
-    document.getElementById("btnClear").onclick = ()=>{
-      gpuSel.value="All"; regionSel.value="All"; typeSel.value="All"; durSel.value="All"; countSel.value="All";
-      state.filters={gpu:"All",region:"All",type:"All",duration:"All",count:"All"}; hydrateAll();
-    };
-
-    // quick calc selects reuse lists
-    setOptions(document.getElementById("qc_gpu"), uniq(state.scores.map(r=>r.gpu)).sort(), false);
-    setOptions(document.getElementById("qc_region"), uniq(state.scores.map(r=>r.region)).sort(), false);
-    setOptions(document.getElementById("qc_count"), [8,16,32,64], false);
-    setOptions(document.getElementById("qc_dur"), ["1 hour","1 day","1 week","1 month"], false);
-    document.getElementById("btnCalc").onclick = runQuickCalc;
-
-    // debug toggle
-    document.getElementById("toggleDebug").addEventListener("change", (e)=>{
-      document.getElementById("debugPanel").classList.toggle("on", e.target.checked);
-    });
-
-    // as-of time
-    const asof = safeGet(state.predict,"asof_utc", null);
-    document.getElementById("asOf").textContent = "Updated: " + (asof ? fmt.date(asof) : new Date().toISOString().replace('T',' ').replace('Z',''));
-  }
-
-  // ------- Apply filters -------
-  function applyFilters(rows){
-    const f = state.filters;
-    return rows.filter(r=>
-      (f.gpu==="All"     || r.gpu===f.gpu) &&
-      (f.region==="All"  || r.region===f.region) &&
-      (f.type==="All"    || r.type===f.type) &&
-      (f.duration==="All"|| r.duration===f.duration) &&
-      (f.count==="All"   || String(r.count)===String(f.count))
-    );
-  }
-
-  // ------- KPIs, tables -------
-  function hydrateAll(){
-    // Leaderboard filtered
-    const rows = applyFilters(state.scores).sort(byNumAsc("price"));
-    document.getElementById("kpi_rows").textContent = rows.length;
-
-    // KPIs
-    if(rows.length){
-      const lo = rows[0];
-      document.getElementById("kpi_low").textContent = fmt.money(lo.price);
-      document.getElementById("kpi_low_sub").textContent = `${lo.provider} · ${lo.region} · ${lo.gpu} (${lo.type})`;
-      const prices = rows.map(r=>r.price).filter(x=>isFinite(x)).sort((a,b)=>a-b);
-      const mid = prices[Math.floor(prices.length/2)];
-      document.getElementById("kpi_med").textContent = fmt.money(mid);
-      document.getElementById("kpi_med_sub").textContent = `${rows.length} quotes`;
-      const provs = uniq(rows.map(r=>r.provider)).length;
-      document.getElementById("kpi_prov").textContent = provs;
-    }else{
-      for(const id of ["kpi_low","kpi_med","kpi_prov"]){ document.getElementById(id).textContent="–"; }
-      document.getElementById("kpi_low_sub").textContent="";
-      document.getElementById("kpi_med_sub").textContent="";
-    }
-
-    // Leaderboard table
-    const tbody = document.querySelector("#tbl_leader tbody");
-    tbody.innerHTML = rows.map(r=>`
-      <tr>
-        <td>${r.provider}</td>
-        <td>${r.region}</td>
-        <td>${r.gpu}</td>
-        <td><span class="pill">${r.type}</span></td>
-        <td>${r.duration||"–"}</td>
-        <td>${r.count!=null? r.count : "–"}</td>
-        <td class="right">${fmt.money(r.price)}</td>
-        <td class="right">${r.score!=null? Number(r.score).toFixed(1):"–"}</td>
-        <td class="right">${fmt.date(r.ts)}</td>
-      </tr>
-    `).join("");
-
-    // ROI table (simple — show all rows, no filter interaction)
-    const rbody = document.querySelector("#tbl_roi tbody");
-    rbody.innerHTML = state.roi.map(r=>`
-      <tr>
-        <td>${r.gpu}</td><td>${r.count}</td><td>${r.duration}</td>
-        <td>${r.provider}</td><td>${r.region}</td>
-        <td class="right">${fmt.money(r.p)}</td>
-        <td class="right">${fmt.money0(r.total)}</td>
-        <td class="right">${fmt.date(r.ts)}</td>
-      </tr>`).join("");
-
-    // Compute calculator snapshot
-    const cbody = document.querySelector("#tbl_comp tbody");
-    cbody.innerHTML = state.snap.map(r=>{
-      const lo = r.price_lo ?? r.price_lo_usd ?? r.lo;
-      const md = r.price_md ?? r.price_md_usd ?? r.md;
-      const hi = r.price_hi ?? r.price_hi_usd ?? r.hi;
-      return `<tr>
-        <td>${r.gpu_model || r.gpu || ""}</td>
-        <td>${r.provider_type || r.provider_type_label || ""}</td>
-        <td>${r["$/GPU-hr"] || (lo && hi ? `$${lo}–$${hi}`:"")}</td>
-        <td>${r.TOTAL || r.total || ""}</td>
-        <td class="right">${lo??""}</td>
-        <td class="right">${md??""}</td>
-        <td class="right">${hi??""}</td>
-        <td class="right">${r.term_hours || r.term_hrs || ""}</td>
-        <td class="right">${r.gpu_count || r.gpus || ""}</td>
-        <td>${r.used_region || r.region || ""}</td>
-        <td class="right">${r.n_quotes || r.quotes || ""}</td>
-        <td>${r.source || ""}</td>
-      </tr>`;
-    }).join("");
-
-    // Predictions tiles (from last snapshot)
-    const pp = state.predict||{};
-    const moneyOrDash = v => (v==null||isNaN(v)) ? "–" : `$${Number(v).toFixed(2)}`;
-    document.getElementById("p10").textContent  = moneyOrDash(pp.p10);
-    document.getElementById("p25").textContent  = moneyOrDash(pp.p25);
-    document.getElementById("p50").textContent  = moneyOrDash(pp.p50);
-    document.getElementById("p7590").textContent= `${moneyOrDash(pp.p75||pp.p50)} / ${moneyOrDash(pp.p90)}`
-  }
-
-  function runQuickCalc(){
-    const gpu  = document.getElementById("qc_gpu").value;
-    const reg  = document.getElementById("qc_region").value;
-    const cnt  = Number(document.getElementById("qc_count").value);
-    const durS = document.getElementById("qc_dur").value;
-    const hours= toHours(durS) || 0;
-    const usePred = document.getElementById("qc_usePred").checked;
-
-    // candidate rows
-    let rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && r.type.match(/On-Demand/i));
-    // compute total cost by provider using min observed price
-    const byProv = new Map();
-    rows.forEach(r=>{
-      const key = r.provider+"|"+r.region;
-      const best = byProv.get(key);
-      if(!best || r.price < best.price) byProv.set(key, r);
-    });
-
-    let out = [...byProv.values()].map(r=>({
-      provider:r.provider, region:r.region, price:r.price,
-      total: r.price * cnt * hours, src:"observed"
-    }));
-
-    // overlay prediction as a synthetic row if asked
-    if(usePred && state.predict && state.predict.gpu_model===gpu && state.predict.region===reg && state.predict.p50){
-      out.push({
-        provider:"Predicted (P50)", region:state.predict.used_region||reg,
-        price:Number(state.predict.p50),
-        total:Number(state.predict.p50)*cnt*hours, src:"predicted"
-      });
-    }
-
-    out.sort((a,b)=>a.total-b.total);
-    const tbody = document.querySelector("#tbl_qc tbody");
-    tbody.innerHTML = out.map(r=>`
-      <tr>
-        <td>${r.provider}</td><td>${r.region}</td>
-        <td class="right">${fmt.money(r.price)}</td>
-        <td class="right">${fmt.money0(r.total)}</td>
-        <td class="right"><span class="badge">${r.src}</span></td>
-      </tr>`).join("");
-  }
-
-  loadAll();
+  loadForecast();
 })();
 </script>
 </body>
 </html>
+
 
 
 

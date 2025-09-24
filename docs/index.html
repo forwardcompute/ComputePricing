@@ -57,6 +57,9 @@
   .roiCell{background:var(--row);border:1px solid var(--muted);border-radius:12px;padding:10px;cursor:pointer}
   .roiCell h4{margin:0 0 6px 0;font-size:13px;color:var(--sub);font-weight:600}
   .roiCell .total{font-size:18px;font-weight:800}
+
+  /* error banner */
+  #errBanner{display:none;margin:10px 0;padding:10px;border-radius:10px;border:1px solid #4b1f24;background:#2a0f12;color:#ffb3b8}
 </style>
 </head>
 <body>
@@ -66,6 +69,8 @@
       <span class="small">Auto-generated from <code>data/derived/</code></span>
       <div class="updated" id="asOf">Updated: —</div>
     </header>
+
+    <div id="errBanner"></div>
 
     <!-- HERO FILTERS -->
     <div class="row hero">
@@ -260,21 +265,70 @@
 window.addEventListener('DOMContentLoaded', () => {
 (function(){
   // ---------------------- DEBUG ----------------------
-  const dbg=[]; const logDbg=(m)=>{dbg.push(m); const el=document.getElementById("debugLines"); if(el) el.innerHTML=dbg.map(s=>`<div>${s}</div>`).join(""); console.log("[Price-IQ]",m);};
+  const dbg=[]; 
+  const logDbg=(m)=>{dbg.push(m); const el=document.getElementById("debugLines"); if(el) el.innerHTML=dbg.map(s=>`<div>${s}</div>`).join(""); console.log("[Price-IQ]",m);};
   const dbgToggle=document.getElementById("toggleDebug"), debugPanel=document.getElementById("debugPanel");
   if (dbgToggle && debugPanel) dbgToggle.addEventListener("change",(e)=>debugPanel.classList.toggle("on", e.target.checked));
+  const errBanner=document.getElementById('errBanner');
+  const showErr=(msg)=>{ if(!errBanner) return; errBanner.style.display='block'; errBanner.textContent=msg; };
 
   // ---------------------- UTILS ----------------------
   const fmt={ money:n=>n==null||isNaN(n)?'–':`$${Number(n).toFixed(2)}`, money0:n=>n==null||isNaN(n)?'–':`$${Number(n).toFixed(0)}`, num:n=>n==null||isNaN(n)?'–':Number(n).toLocaleString(), date:s=>s?String(s).replace('T',' ').replace('Z',''):'–' };
   const numify=x=> x==null ? NaN : Number(String(x).replace(/[^\d.\-]/g,""));
-  function parseCSV(txt){ const lines=txt.replace(/^\uFEFF/,'').trim().split(/\r?\n/); if(!lines.length)return[]; const header=lines.shift().split(",").map(h=>h.trim()); return lines.filter(Boolean).map(line=>{const cells=line.split(",").map(s=>s.trim()); const o={}; header.forEach((h,i)=>o[h]=cells[i]??""); return o;});}
-  const uniq=arr=>[...new Set(arr)]; const byNumAsc=key=>(a,b)=>(+a[key]||1e12)-(+b[key]||1e12);
+  // RFC4180-ish CSV parser (handles quotes, commas, BOM)
+  function parseCSV(text){
+    if(!text || !text.trim()) return [];
+    text = text.replace(/^\uFEFF/,''); // strip BOM
+    const rows=[]; let row=[]; let field=''; let inQ=false; let i=0;
+    const pushField=()=>{ row.push(field); field=''; };
+    const pushRow=()=>{ rows.push(row); row=[]; };
+    while(i<text.length){
+      const ch=text[i];
+      if(inQ){
+        if(ch === '"'){
+          if(text[i+1] === '"'){ field+='"'; i+=2; continue; }
+          inQ = false; i++; continue;
+        }
+        field += ch; i++; continue;
+      }else{
+        if(ch === '"'){ inQ=true; i++; continue; }
+        if(ch === ','){ pushField(); i++; continue; }
+        if(ch === '\r'){ i++; continue; }
+        if(ch === '\n'){ pushField(); pushRow(); i++; continue; }
+        field += ch; i++; continue;
+      }
+    }
+    // last field/row
+    pushField(); if(row.length>1 || row[0] !== '') pushRow();
+    if(!rows.length) return [];
+    const header=rows.shift().map(h=>String(h).trim());
+    return rows.filter(r=>r.length && r.some(x=>String(x).trim()!=='')).map(cells=>{
+      const o={}; header.forEach((h,idx)=> o[h]= (cells[idx]??'').toString().trim() ); return o;
+    });
+  }
+  const uniq=arr=>[...new Set(arr)];
+  const byNumAsc=key=>(a,b)=>(+a[key]||1e12)-(+b[key]||1e12);
   function durToHours(s){ const v=String(s||"").toLowerCase(); if(/month/.test(v)) return 24*30; if(/week/.test(v)) return 24*7; if(/day/.test(v)) return 24; return 1; }
+  // helper to map flexible column names
+  const pick=(row, keys, fallback=null)=>{ for(const k of keys){ if(row[k]!==undefined && row[k]!== '') return row[k]; } return fallback; };
 
   // ---------------------- PATHS ----------------------
   async function tryFetch(url){ const bust=(url.includes('?')?'&':'?')+'v='+Date.now(); const r=await fetch(url+bust,{cache:"no-store"}); if(!r.ok) throw new Error(r.status+" "+url); return r; }
-  const DER_BASES=["data/derived/","./data/derived/","../data/derived/","docs/data/derived/","./docs/data/derived/","/data/derived/","/docs/data/derived/"];
-  async function getDerived(file){ for(const b of DER_BASES){ try{ const r=await tryFetch(b+file); logDbg("✅ "+b+file); return r; }catch(e){} } logDbg("❌ MISSING: "+file); throw new Error("Missing "+file);}
+  // Try most likely paths first for GitHub Pages (page in /docs/)
+  const DER_BASES=[
+    "./data/derived/","data/derived/","../data/derived/",
+    "docs/data/derived/","./docs/data/derived/",
+    "/data/derived/","/docs/data/derived/",
+  ];
+  async function getDerived(file){
+    let lastErr=null;
+    for(const b of DER_BASES){
+      try{ const r=await tryFetch(b+file); logDbg("✅ "+b+file); return r; }catch(e){ lastErr=e; }
+    }
+    logDbg("❌ MISSING: "+file);
+    if(lastErr) showErr(`Missing or unreachable: ${file}. Put it in docs/data/derived/ (or enable debug to see tried paths).`);
+    throw new Error("Missing "+file);
+  }
 
   // ---------------------- STATE ----------------------
   const state={ scores:[], roi:[], predict:null, snap:[], forecast:[], filters:{gpu:"All",region:"All",type:"On-Demand",duration:"All",count:"All"} };
@@ -283,33 +337,81 @@ window.addEventListener('DOMContentLoaded', () => {
   const files={ scores:"provider_scores_latest.csv", roi:"roi_comparison.csv", predict:"price_predict_snapshot.json", snap:"compute_calculator_snapshot.csv", forecast:"forecast.csv" };
 
   async function loadAll(){
+    let anyLoaded=false;
+
     try{
       const txt=await (await getDerived(files.scores)).text();
-      state.scores=parseCSV(txt).map(r=>({ provider:r.provider, region:r.region, gpu:r.gpu_model, type:r.type, duration:r.duration, count:r.gpu_count?Number(r.gpu_count):null, price:numify(r.effective_price_usd_per_gpu_hr), score:r.priceiq_score?Number(r.priceiq_score):null, ts:r.timestamp })).filter(r=>isFinite(r.price));
+      const rows=parseCSV(txt);
+      state.scores=rows.map(r=>{
+        const provider=pick(r,["provider","provider_name","name"]);
+        const region=pick(r,["region","used_region","location"]);
+        const gpu=pick(r,["gpu_model","gpu","model"]);
+        const type=pick(r,["type","provider_type","provider_type_label"]);
+        const duration=pick(r,["duration","term","term_label"]);
+        const count=Number(pick(r,["gpu_count","count","gpus"]));
+        const priceRaw=pick(r,[
+          "effective_price_usd_per_gpu_hr","price_usd_per_gpu_hr","price_per_gpu_hr","price_hourly_usd","usd_per_gpu_hr","$/GPU-hr"
+        ]);
+        const score=Number(pick(r,["priceiq_score","price_iq","score"]));
+        const ts=pick(r,["timestamp","ts","time_iso","date"]);
+        const price=numify(priceRaw);
+        return {provider,region,gpu,type,duration,count:isFinite(count)?count:null,price,score:isFinite(score)?score:null,ts};
+      }).filter(r=>r.provider && r.gpu && isFinite(r.price));
       logDbg(`rows(scores): ${state.scores.length}`);
+      anyLoaded = anyLoaded || state.scores.length>0;
     }catch(e){ logDbg("scores load error: "+e); }
 
     try{
       const txt=await (await getDerived(files.roi)).text();
-      state.roi=parseCSV(txt).map(r=>{
-        const count=Number(r.gpu_count), hrs=durToHours(r.duration), total=Number(r.total_cost_usd), csvRate=Number(r.price_per_gpu_hr);
+      const rows=parseCSV(txt);
+      state.roi=rows.map(r=>{
+        const gpu=pick(r,["gpu_model","gpu"]);
+        const count=Number(pick(r,["gpu_count","count"],""));
+        const duration=pick(r,["duration","term"]);
+        const provider=pick(r,["best_provider","provider"]);
+        const region=pick(r,["best_region","region"]);
+        const total=Number(pick(r,["total_cost_usd","total","TOTAL"]));
+        const csvRate=Number(pick(r,["price_per_gpu_hr","price_usd_per_gpu_hr","$/GPU-hr"]));
+        const hrs=durToHours(duration);
         const derived=(isFinite(total)&&isFinite(count)&&count>0&&hrs>0)?(total/(count*hrs)):NaN;
         let p_eff=isFinite(derived)?derived:csvRate;
-        if(isFinite(csvRate)&&isFinite(derived)){ const diff=Math.abs(csvRate-derived)/Math.max(derived,1e-9); p_eff=(diff<=0.01)?csvRate:derived; }
-        return { gpu:r.gpu_model, count, duration:r.duration, provider:r.best_provider, region:r.best_region, p_csv:csvRate, p_eff, total, hrs, ts:r.timestamp };
+        if(isFinite(csvRate)&&isFinite(derived)){
+          const diff=Math.abs(csvRate-derived)/Math.max(derived,1e-9);
+          p_eff=(diff<=0.01)?csvRate:derived;
+        }
+        const ts=pick(r,["timestamp","ts","date"]);
+        return { gpu, count, duration, provider, region, p_csv:csvRate, p_eff, total, hrs, ts };
       }).filter(r=>isFinite(r.total));
       logDbg(`rows(roi): ${state.roi.length}`);
+      anyLoaded = anyLoaded || state.roi.length>0;
     }catch(e){ logDbg("roi load error: "+e); }
 
-    try{ state.predict=await (await getDerived(files.predict)).json(); logDbg("predict: ok"); }catch(e){ logDbg("predict not found (ok)"); }
+    try{ state.predict=await (await getDerived(files.predict)).json(); logDbg("predict: ok"); anyLoaded=true; }catch(e){ logDbg("predict not found (ok)"); }
 
-    try{ const txt=await (await getDerived(files.snap)).text(); state.snap=parseCSV(txt); logDbg(`rows(snapshot): ${state.snap.length}`);}catch(e){ logDbg("snapshot load error: "+e); }
+    try{
+      const txt=await (await getDerived(files.snap)).text();
+      state.snap=parseCSV(txt);
+      logDbg(`rows(snapshot): ${state.snap.length}`);
+      anyLoaded = anyLoaded || state.snap.length>0;
+    }catch(e){ logDbg("snapshot load error: "+e); }
 
     try{
       const txt=await (await getDerived(files.forecast)).text();
-      state.forecast=parseCSV(txt).map(r=>({ gpu:r.gpu_model, region:r.region, type:r.type, duration:r.duration, count:Number(r.gpu_count), date:r.date_utc||r.date||r.ts, h:Number(r.horizon_hr||r.h||0), p10:Number(r.p10), p25:Number(r.p25), p50:Number(r.p50), p75:Number(r.p75), p90:Number(r.p90) })).filter(r=>r.date && isFinite(r.p50));
+      const rows=parseCSV(txt);
+      state.forecast=rows.map(r=>({
+        gpu:pick(r,["gpu_model","gpu"]), region:pick(r,["region"]), type:pick(r,["type"]), duration:pick(r,["duration"]),
+        count:Number(pick(r,["gpu_count","count"],0)), date:pick(r,["date_utc","date","ts"]),
+        h:Number(pick(r,["horizon_hr","h"],0)), p10:Number(r.p10), p25:Number(r.p25), p50:Number(r.p50), p75:Number(r.p75), p90:Number(r.p90)
+      })).filter(r=>r.date && isFinite(r.p50));
       logDbg(`rows(forecast): ${state.forecast.length}`);
+      anyLoaded = anyLoaded || state.forecast.length>0;
     }catch(e){ logDbg("forecast not found (ok)"); }
+
+    if(!anyLoaded){
+      showErr("No data rows loaded. Turn on 'Show data status (debug)' to see which files/paths failed. Ensure CSV headers match the expected fields or use the flexible variants included here.");
+      // auto-open debug to help
+      if(dbgToggle && debugPanel){ dbgToggle.checked=true; debugPanel.classList.add('on'); }
+    }
 
     initFilters(); hydrateAll(); initQuickCalc(); initBenchmarkUI(); initROIImproved();
     renderForecast(); // will auto-fill if empty
@@ -319,8 +421,14 @@ window.addEventListener('DOMContentLoaded', () => {
   function setOptions(el,arr,withAll=true){ if(!el) return; const vals=withAll?["All",...arr]:arr; el.innerHTML=vals.map(v=>`<option>${v}</option>`).join(""); }
 
   function initFilters(){
-    const gpus=uniq(state.scores.map(r=>r.gpu)).sort(), regs=uniq(state.scores.map(r=>r.region)).sort(), types=uniq(state.scores.map(r=>r.type)).sort(), durs=uniq(state.scores.map(r=>r.duration)).sort(), cnts=uniq(state.scores.map(r=>r.count).filter(Boolean)).sort((a,b)=>a-b);
-    const gpuSel=document.getElementById("f_gpu"), regSel=document.getElementById("f_region"), typSel=document.getElementById("f_type"), durSel=document.getElementById("f_duration"), cntSel=document.getElementById("f_count");
+    const gpus=uniq(state.scores.map(r=>r.gpu).filter(Boolean)).sort(),
+          regs=uniq(state.scores.map(r=>r.region).filter(Boolean)).sort(),
+          types=uniq(state.scores.map(r=>r.type).filter(Boolean)).sort(),
+          durs=uniq(state.scores.map(r=>r.duration).filter(Boolean)).sort(),
+          cnts=uniq(state.scores.map(r=>r.count).filter(Boolean)).sort((a,b)=>a-b);
+    const gpuSel=document.getElementById("f_gpu"), regSel=document.getElementById("f_region"),
+          typSel=document.getElementById("f_type"), durSel=document.getElementById("f_duration"),
+          cntSel=document.getElementById("f_count");
     setOptions(gpuSel,gpus); setOptions(regSel,regs); setOptions(typSel,types); setOptions(durSel,durs); setOptions(cntSel,cnts);
     if(gpuSel) gpuSel.value=gpus.includes("H100")?"H100":(gpus[0]||"All");
     if(typSel) typSel.value=types.includes("On-Demand")?"On-Demand":"All";
@@ -329,6 +437,8 @@ window.addEventListener('DOMContentLoaded', () => {
     [gpuSel,regSel,typSel,durSel,cntSel].forEach((el,i)=>{ if(!el) return; const keys=["gpu","region","type","duration","count"]; const k=keys[i]; el.addEventListener("change", ()=>{ state.filters[k]=el.value; hydrateAll(); }); });
     const times=[...state.scores.map(r=>r.ts).filter(Boolean), ...state.roi.map(r=>r.ts).filter(Boolean)].sort(); const latest=times.pop();
     const asOf=document.getElementById("asOf"); if(asOf) asOf.textContent="Updated: "+(latest?fmt.date(latest):new Date().toISOString().replace('T',' ').replace('Z',''));
+    const btnClear=document.getElementById("btnClear");
+    if(btnClear) btnClear.onclick=()=>{ if(gpuSel) gpuSel.value=gpus.includes("H100")?"H100":(gpus[0]||"All"); ["f_region","f_type","f_duration","f_count"].forEach(id=>{ const el=document.getElementById(id); if(el) el.value="All"; }); state.filters={gpu:gpuSel?.value||"All",region:"All",type:"All",duration:"All",count:"All"}; hydrateAll(); };
   }
 
   function applyFilters(rows){ const f=state.filters; return rows.filter(r=>(f.gpu==="All"||r.gpu===f.gpu)&&(f.region==="All"||r.region===f.region)&&(f.type==="All"||r.type===f.type)&&(f.duration==="All"||r.duration===f.duration)&&(f.count==="All"||String(r.count)===String(f.count))); }
@@ -347,9 +457,24 @@ window.addEventListener('DOMContentLoaded', () => {
     if(lbBody) lbBody.innerHTML=rows.map(r=>`<tr><td>${r.provider}</td><td>${r.region}</td><td>${r.gpu}</td><td><span class="pill">${r.type}</span></td><td>${r.duration||"–"}</td><td>${r.count!=null?r.count:"–"}</td><td class="right">${fmt.money(r.price)}</td><td class="right">${r.score!=null?Number(r.score).toFixed(1):"–"}</td><td class="right">${fmt.date(r.ts)}</td></tr>`).join("");
 
     const cbody=document.querySelector("#tbl_comp tbody");
-    if(cbody) cbody.innerHTML=state.snap.map(r=>{ const lo=r.price_lo??r.price_lo_usd??r.lo, md=r.price_md??r.price_md_usd??r.md, hi=r.price_hi??r.price_hi_usd??r.hi; return `<tr><td>${r.gpu_model||r.gpu||""}</td><td>${r.provider_type||r.provider_type_label||""}</td><td>${r["$/GPU-hr"]||(lo&&hi?`$${lo}–$${hi}`:"")}</td><td>${r.TOTAL||r.total||""}</td><td class="right">${lo??""}</td><td class="right">${md??""}</td><td class="right">${hi??""}</td><td class="right">${r.term_hours||r.term_hrs||""}</td><td class="right">${r.gpu_count||r.gpus||""}</td><td>${r.used_region||r.region||""}</td><td class="right">${r.n_quotes||r.quotes||""}</td><td>${r.source||""}</td></tr>`; }).join("");
+    if(cbody) cbody.innerHTML=state.snap.map(r=>{
+      const lo=r.price_lo??r.price_lo_usd??r.lo, md=r.price_md??r.price_md_usd??r.md, hi=r.price_hi??r.price_hi_usd??r.hi;
+      return `<tr>
+        <td>${r.gpu_model||r.gpu||""}</td>
+        <td>${r.provider_type||r.provider_type_label||""}</td>
+        <td>${r["$/GPU-hr"]||(lo&&hi?`$${lo}–$${hi}`:"")}</td>
+        <td>${r.TOTAL||r.total||""}</td>
+        <td class="right">${lo??""}</td><td class="right">${md??""}</td><td class="right">${hi??""}</td>
+        <td class="right">${r.term_hours||r.term_hrs||""}</td>
+        <td class="right">${r.gpu_count||r.gpus||""}</td>
+        <td>${r.used_region||r.region||""}</td>
+        <td class="right">${r.n_quotes||r.quotes||""}</td>
+        <td>${r.source||""}</td>
+      </tr>`;
+    }).join("");
 
-    const pp=state.predict||{}; const moneyOrDash=v=>(v==null||isNaN(v))?"–":`$${Number(v).toFixed(2)}`; set("p10",moneyOrDash(pp.p10)); set("p25",moneyOrDash(pp.p25)); set("p50",moneyOrDash(pp.p50)); set("p7590",`${moneyOrDash(pp.p75||pp.p50)} / ${moneyOrDash(pp.p90)}`);
+    const pp=state.predict||{}; const moneyOrDash=v=>(v==null||isNaN(v))?"–":`$${Number(v).toFixed(2)}`;
+    set("p10",moneyOrDash(pp.p10)); set("p25",moneyOrDash(pp.p25)); set("p50",moneyOrDash(pp.p50)); set("p7590",`${moneyOrDash(pp.p75||pp.p50)} / ${moneyOrDash(pp.p90)}`);
   }
 
   // ---------------------- QUICK CALC ----------------------
@@ -357,21 +482,8 @@ window.addEventListener('DOMContentLoaded', () => {
     const gpus=uniq(state.scores.map(r=>r.gpu)).sort(), regs=uniq(state.scores.map(r=>r.region)).sort();
     const setOpts=(el,arr)=>{ if(el) el.innerHTML=arr.map(v=>`<option>${v}</option>`).join(""); };
     const qc_gpu=document.getElementById("qc_gpu"), qc_region=document.getElementById("qc_region"), qc_count=document.getElementById("qc_count"), qc_dur=document.getElementById("qc_dur");
+    if(!qc_gpu || !qc_region || !qc_count || !qc_dur) return; // hidden if you didn’t add the quick calc table
     setOpts(qc_gpu,gpus); setOpts(qc_region,regs); setOpts(qc_count,[8,16,32,64]); setOpts(qc_dur,["1 hour","1 day","1 week","1 month"]);
-    if(qc_gpu) qc_gpu.value=gpus.includes("H100")?"H100":(gpus[0]||""); if(qc_region) qc_region.value=regs.includes("Global")?"Global":(regs[0]||""); if(qc_count) qc_count.value="8"; if(qc_dur) qc_dur.value="1 hour";
-    const btn=document.getElementById("btnCalc"); if(btn) btn.onclick=runQuickCalc; runQuickCalc();
-  }
-  function runQuickCalc(){
-    const qc_gpu=document.getElementById("qc_gpu"), qc_region=document.getElementById("qc_region"), qc_count=document.getElementById("qc_count"), qc_dur=document.getElementById("qc_dur");
-    if(!qc_gpu||!qc_region||!qc_count||!qc_dur) return;
-    const gpu=qc_gpu.value; let reg=qc_region.value; const cnt=Number(qc_count.value||0); const hrs=durToHours(qc_dur.value); const usePred=!!document.getElementById("qc_usePred")?.checked;
-    let rows=state.scores.filter(r=>r.gpu===gpu&&r.region===reg&&/On-Demand/i.test(r.type));
-    if(!rows.length){ const any=state.scores.find(r=>r.gpu===gpu&&/On-Demand/i.test(r.type)); if(any){ reg=any.region; rows=state.scores.filter(r=>r.gpu===gpu&&r.region===reg&&/On-Demand/i.test(r.type)); if(qc_region) qc_region.value=reg; logDbg(`QC: no rows for chosen region, using ${reg}`);} }
-    const byProv=new Map(); rows.forEach(r=>{ const k=r.provider+"|"+r.region; const best=byProv.get(k); if(!best||r.price<best.price) byProv.set(k,r); });
-    let out=[...byProv.values()].map(r=>({provider:r.provider, region:r.region, price:r.price, total:r.price*cnt*hrs, src:"observed"}));
-    if(usePred && state.predict && state.predict.gpu_model===gpu && state.predict.region===reg && state.predict.p50){ out.push({provider:"Predicted (P50)", region:reg, price:Number(state.predict.p50), total:Number(state.predict.p50)*cnt*hrs, src:"predicted"}); }
-    out.sort((a,b)=>a.total-b.total);
-    const body=document.querySelector("#tbl_qc tbody"); if(body) body.innerHTML=out.map(r=>`<tr><td>${r.provider}</td><td>${r.region}</td><td class="right">${fmt.money(r.price)}</td><td class="right">${fmt.money0(r.total)}</td><td class="right"><span class="badge">${r.src}</span></td></tr>`).join("");
   }
 
   // ---------------------- BENCHMARK ----------------------
@@ -422,7 +534,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   function bindForecastUX(){
     const elEmpty=document.getElementById("fcEmpty"), elChart=document.getElementById("fc_chart"), elUpload=document.getElementById("fcUpload"), elGen=document.getElementById("fcGen"), elTpl=document.getElementById("fcTpl"), elTrainer=document.getElementById("fcTrainer");
-    if(elUpload){ elUpload.onchange=async (e)=>{ const f=e.target.files?.[0]; if(!f) return; const txt=await f.text(); const rows=parseCSV(txt).map(r=>({ gpu:r.gpu_model, region:r.region, type:r.type, duration:r.duration, count:Number(r.gpu_count||0), date:r.date_utc||r.date||r.ts, p10:Number(r.p10), p25:Number(r.p25), p50:Number(r.p50), p75:Number(r.p75), p90:Number(r.p90) })).filter(r=>r.date&&isFinite(r.p50)); state.forecast=rows; elEmpty.style.display="none"; elChart.style.display="block"; renderForecast(); }; }
+    if(elUpload){ elUpload.onchange=async (e)=>{ const f=e.target.files?.[0]; if(!f) return; const txt=await f.text(); const rows=parseCSV(txt).map(r=>({ gpu:pick(r,["gpu_model","gpu"]), region:r.region, type:r.type, duration:r.duration, count:Number(pick(r,["gpu_count","count"],0)), date:pick(r,["date_utc","date","ts"]), p10:Number(r.p10), p25:Number(r.p25), p50:Number(r.p50), p75:Number(r.p75), p90:Number(r.p90) })).filter(r=>r.date&&isFinite(r.p50)); state.forecast=rows; elEmpty.style.display="none"; elChart.style.display="block"; renderForecast(); }; }
     if(elGen){ elGen.onclick=()=>{ const gpu=document.getElementById("bm_gpu")?.value||"H100", reg=document.getElementById("bm_region")?.value||"Global", typ=document.getElementById("bm_type")?.value||"On-Demand", dur=document.getElementById("bm_duration")?.value||"1 hour", cnt=Number(document.getElementById("bm_count")?.value||8); const getN=id=>Number((document.getElementById(id)?.textContent||"").replace(/[^0-9.]/g,""))||NaN; const p10=getN("bm_p10"), p25=getN("bm_p25"), p50=getN("bm_p50"), p75=getN("bm_p75"), p90=getN("bm_p90"); const base50=isFinite(p50)?p50:(state.scores.map(r=>r.price).sort((a,b)=>a-b)[Math.floor(state.scores.length/2)]||1); const base10=isFinite(p10)?p10:base50*0.85, base25=isFinite(p25)?p25:base50*0.92, base75=isFinite(p75)?p75:base50*1.08, base90=isFinite(p90)?p90:base50*1.15; const now=new Date(); const rows=[]; for(let h=1; h<=72; h++){ const d=new Date(now.getTime()+h*3600*1000); const sin=Math.sin((h/24)*Math.PI*2); const drift=1+0.02*(h/72 - 0.5); const jitter=v=>(v*drift*(1+0.01*sin)); rows.push({gpu, region:reg, type:typ, duration:dur, count:cnt, date:d.toISOString(), p10:jitter(base10), p25:jitter(base25), p50:jitter(base50), p75:jitter(base75), p90:jitter(base90)});} state.forecast=rows; document.getElementById("fcEmpty").style.display="none"; document.getElementById("fc_chart").style.display="block"; renderForecast(); }; }
     if(elTpl){ elTpl.onclick=()=>{ const gpu=document.getElementById("bm_gpu")?.value||"H100", reg=document.getElementById("bm_region")?.value||"Global", typ=document.getElementById("bm_type")?.value||"On-Demand", dur=document.getElementById("bm_duration")?.value||"1 hour", cnt=Number(document.getElementById("bm_count")?.value||8); const now=new Date(); const sample=[]; for(let h=1; h<=3; h++){ const d=new Date(now.getTime()+h*3600*1000); sample.push({gpu, region:reg, type:typ, duration:dur, count:cnt, date:d.toISOString(), p10:1.00, p25:1.10, p50:1.20, p75:1.30, p90:1.40}); } downloadText("forecast_template.csv", csvFromRows(sample), "text/csv"); }; }
     if(elTrainer){ elTrainer.onclick=()=> downloadText("train_forecast.py", TRAINER_PY, "text/x-python"); }
@@ -473,15 +585,13 @@ def main():
         gpu,region,typ,dur=slc.split("|")
         Xf=future_design(g[["timestamp","price"]+feats],feats,models,72)
         preds={q:models[q].predict(Xf[feats]) for q in [0.1,0.25,0.5,0.75,0.9]}
-        stack=np.sort(np.vstack([preds[0.1],preds[0.25],preds[0.5],preds[0.75],preds[0.9]]).T,axis=1)
         ts=pd.date_range(df["timestamp"].max()+pd.Timedelta(hours=1),periods=72,freq="H")
         for i,t in enumerate(ts):
-            out_rows.append(dict(gpu_model=gpu,region=region,type=typ,duration=dur,gpu_count=8,date_utc=t.tz_localize("UTC").isoformat(),p10=stack[i,0],p25=stack[i,1],p50=stack[i,2],p75=stack[i,3],p90=stack[i,4]))
+            out_rows.append(dict(gpu_model=gpu,region=region,type=typ,duration=dur,gpu_count=8,date_utc=t.tz_localize("UTC").isoformat(),p10=preds[0.1][i],p25=preds[0.25][i],p50=preds[0.5][i],p75=preds[0.75][i],p90=preds[0.9][i]))
     OUT.parent.mkdir(parents=True,exist_ok=True); pd.DataFrame(out_rows).to_csv(OUT,index=False); print(f"Wrote {OUT} with {len(out_rows)} rows.")
 if __name__=="__main__": main()
 `;
 
-  // Chart render
   let _fcChart;
   function renderForecastInner(){
     const fc=state.forecast||[]; const noteEl=document.getElementById("fcNote"); const metaEl=document.getElementById("fcMeta"); const canvas=document.getElementById("fc_chart");
@@ -519,7 +629,6 @@ if __name__=="__main__": main()
   }
 
   function renderForecast(){
-    // If no forecast data, fill from scores automatically
     if(!state.forecast || !state.forecast.length){
       const auto=computeAutoForecastFromScores(72);
       if(auto.length){ state.forecast=auto; }
@@ -579,12 +688,13 @@ if __name__=="__main__": main()
   }
 
   // ---------------------- BOOT ----------------------
-  loadAll();
+  loadAll().catch(e=>{ showErr("Failed to load: "+e.message); });
 })();
 });
 </script>
 </body>
 </html>
+
 
 
 

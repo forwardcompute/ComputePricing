@@ -101,9 +101,7 @@
 
     <!-- DATA STATUS -->
     <div class="sectionTitle" style="margin-top:18px">
-      <div class="switch small">
-        <input type="checkbox" id="toggleDebug"><label for="toggleDebug">Show data status (debug)</label>
-      </div>
+      <div class="switch small"><input type="checkbox" id="toggleDebug"><label for="toggleDebug">Show data status (debug)</label></div>
     </div>
     <div class="card debug" id="debugPanel"><div id="debugLines" class="small"></div></div>
 
@@ -143,9 +141,7 @@
     </div>
 
     <!-- QUICK CALC -->
-    <div class="sectionTitle">
-      <h3 style="margin:0">ROI Calculator (quick)</h3>
-    </div>
+    <div class="sectionTitle"><h3 style="margin:0">ROI Calculator (quick)</h3></div>
     <div class="card">
       <div class="controls" style="flex-wrap:wrap;margin-bottom:10px">
         <select id="qc_gpu"   class="select" style="min-width:160px"></select>
@@ -156,11 +152,7 @@
         <button class="btn" id="btnCalc">Calculate</button>
       </div>
       <table id="tbl_qc">
-        <thead>
-          <tr>
-            <th>Provider</th><th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th><th class="right">Source</th>
-          </tr>
-        </thead>
+        <thead><tr><th>Provider</th><th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th><th class="right">Source</th></tr></thead>
         <tbody></tbody>
       </table>
       <div class="row tileRow" style="margin-top:12px">
@@ -171,7 +163,7 @@
       </div>
     </div>
 
-    <!-- PRICE BENCHMARK (NEW) -->
+    <!-- PRICE BENCHMARK (CROSS-PROVIDER) -->
     <div class="sectionTitle">
       <h3 style="margin:0">Price benchmark (cross-provider)</h3>
       <span class="small">from <code>data/derived/provider_scores_latest.csv</code></span>
@@ -204,7 +196,7 @@
           <div class="row tileRow">
             <div class="card stat"><h4>10% quantile</h4><div class="val" id="bm_p10">–</div></div>
             <div class="card stat"><h4>25% quantile</h4><div class="val" id="bm_p25">–</div></div>
-            <div class="card stat"><h4>median</h4><div class="val" id="bm_p50">–</div></div>
+            <div class="card stat"><h4>Median</h4><div class="val" id="bm_p50">–</div></div>
             <div class="card stat"><h4>75% quantile</h4><div class="val" id="bm_p75">–</div></div>
             <div class="card stat"><h4>90% quantile</h4><div class="val" id="bm_p90">–</div></div>
           </div>
@@ -219,6 +211,16 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- FORECAST (72h) -->
+    <div class="sectionTitle">
+      <h3 style="margin:0">Forecast (next 72 hours)</h3>
+      <span class="small">from <code>forecast.csv</code> · <span id="fcMeta"></span></span>
+    </div>
+    <div class="card">
+      <div class="small" id="fcNote" style="margin-bottom:8px;color:var(--sub)"></div>
+      <canvas id="fc_chart" height="120"></canvas>
     </div>
 
     <!-- SNAPSHOT -->
@@ -295,7 +297,7 @@
 
   // ---------------------- STATE ----------------------
   const state = {
-    scores:[], roi:[], predict:null, snap:[],
+    scores:[], roi:[], predict:null, snap:[], forecast:[],
     filters: {gpu:"All", region:"All", type:"On-Demand", duration:"All", count:"All"}
   };
 
@@ -304,7 +306,8 @@
     scores : "provider_scores_latest.csv",
     roi    : "roi_comparison.csv",
     predict: "price_predict_snapshot.json",
-    snap   : "compute_calculator_snapshot.csv"
+    snap   : "compute_calculator_snapshot.csv",
+    forecast: "forecast.csv"
   };
 
   async function loadAll(){
@@ -333,13 +336,27 @@
     try{ state.predict = await (await getDerived(files.predict)).json(); logDbg("predict: ok"); }
     catch(e){ logDbg("predict not found (ok)"); }
 
-    try{ const txt = await (await getDerived(files.snap)).text(); state.snap = parseCSV(txt); logDbg(`rows(snapshot): ${state.snap.length}`); }
-    catch(e){ logDbg("snapshot load error: "+e); }
+    try{
+      const txt = await (await getDerived(files.snap)).text();
+      state.snap = parseCSV(txt);
+      logDbg(`rows(snapshot): ${state.snap.length}`);
+    }catch(e){ logDbg("snapshot load error: "+e); }
+
+    try{
+      const txt = await (await getDerived(files.forecast)).text();
+      state.forecast = parseCSV(txt).map(r=>({
+        gpu:r.gpu_model, region:r.region, type:r.type, duration:r.duration, count:Number(r.gpu_count),
+        date:r.date_utc || r.date || r.ts, h:Number(r.horizon_hr || r.h || 0),
+        p10:Number(r.p10), p25:Number(r.p25), p50:Number(r.p50), p75:Number(r.p75), p90:Number(r.p90)
+      })).filter(r=>r.date && isFinite(r.p50));
+      logDbg(`rows(forecast): ${state.forecast.length}`);
+    }catch(e){ logDbg("forecast not found (ok)"); }
 
     initFilters();
     hydrateAll();
     initQuickCalc();
-    initBenchmarkUI();   // NEW
+    initBenchmarkUI();
+    renderForecast(); // after benchmark init, draw forecast (fallback if needed)
   }
 
   // ---------------------- FILTERS + KPI ----------------------
@@ -474,7 +491,7 @@
       </tr>`;
     }).join("");
 
-    // Pred tiles
+    // Pred tiles from snapshot
     const pp = state.predict||{};
     const moneyOrDash = v => (v==null||isNaN(v)) ? "–" : `$${Number(v).toFixed(2)}`;
     document.getElementById("p10").textContent  = moneyOrDash(pp.p10);
@@ -525,7 +542,7 @@
 
     // Primary: exact region
     let rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && /On-Demand/i.test(r.type));
-    // If empty, relax region to any with data (and update select to reflect what we used)
+    // Fallback to any region for visibility
     if (!rows.length){
       const any = state.scores.find(r=> r.gpu===gpu && /On-Demand/i.test(r.type));
       if (any){ reg = any.region; rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && /On-Demand/i.test(r.type));
@@ -557,7 +574,7 @@
       </tr>`).join("");
   }
 
-  // ---------------------- PRICE BENCHMARK (NEW) ----------------------
+  // ---------------------- PRICE BENCHMARK ----------------------
   function setOptionsPlain(el, arr){ el.innerHTML = arr.map(v=>`<option>${v}</option>`).join(""); }
   function quantiles(sortedVals, ps){
     const n = sortedVals.length; if (!n) return ps.map(()=>NaN);
@@ -573,7 +590,7 @@
     const mean = values.reduce((a,b)=>a+b,0)/n;
     const s2 = values.reduce((a,b)=>a+(b-mean)**2,0)/Math.max(1,n-1);
     const sd = Math.sqrt(Math.max(s2, 1e-9));
-    const h = 1.06*sd*Math.pow(n,-1/5); // Silverman
+    const h = 1.06*sd*Math.pow(n,-1/5);
     const minV = Math.min(...values), maxV = Math.max(...values);
     const pad = 0.15*(maxV-minV || 1);
     const lo = minV - pad, hi = maxV + pad;
@@ -607,9 +624,9 @@
     document.getElementById("bm_duration").value = durs.find(d=>/1h|1 hour/i.test(d)) || (durs[0]||"");
     document.getElementById("bm_count").value    = counts.includes(8)?8:(counts[0]||"");
 
-    document.getElementById("bm_run").onclick = runBenchmark;
+    document.getElementById("bm_run").onclick = ()=>{ runBenchmark(); renderForecast(); };
     ["bm_gpu","bm_region","bm_type","bm_duration","bm_count"].forEach(id=>{
-      document.getElementById(id).addEventListener("change", runBenchmark);
+      document.getElementById(id).addEventListener("change", ()=>{ runBenchmark(); renderForecast(); });
     });
     runBenchmark();
   }
@@ -625,7 +642,7 @@
     let sample = state.scores.filter(r=> r.gpu===gpu && r.region===reg0 && r.type===typ0 && r.duration===dur0 && String(r.count)===String(cnt0));
     let note = `exact slice (${sample.length})`;
 
-    // relax progressively to ensure data
+    // relax progressively
     if (sample.length < 8) { sample = state.scores.filter(r=> r.gpu===gpu && r.region===reg0 && r.type===typ0 && r.duration===dur0); note="relaxed: drop count"; }
     if (sample.length < 8) { sample = state.scores.filter(r=> r.gpu===gpu && r.region===reg0 && r.type===typ0); note="relaxed: drop duration + count"; }
     if (sample.length < 8) { sample = state.scores.filter(r=> r.gpu===gpu && r.type===typ0); note="relaxed: drop region + duration + count"; }
@@ -649,23 +666,83 @@
     if (_bmChart) _bmChart.destroy();
     _bmChart = new Chart(ctx,{
       type:'line',
+      data:{ labels: x, datasets:[{label:'Normalized Price Distribution', data:y, fill:true, tension:0.35, pointRadius:0, borderWidth:2}]},
+      options:{
+        responsive:true,
+        plugins:{ legend:{display:true}},
+        scales:{
+          y:{ min:0, max:1, ticks:{ callback:v=>v.toFixed(1)}},
+          x:{ ticks:{ callback:(v)=>'$'+Number(x[v]).toFixed(2), autoSkip:true, maxRotation:0 } }
+        },
+        interaction:{ mode:'index', intersect:false }
+      }
+    });
+  }
+
+  // ---------------------- FORECAST (72h) ----------------------
+  let _fcChart;
+  function renderForecast(){
+    const fc = state.forecast||[];
+    const noteEl = document.getElementById("fcNote");
+    const metaEl = document.getElementById("fcMeta");
+    if (!fc.length){
+      noteEl.textContent = "No forecast.csv found or no rows. Add it via the training step.";
+      if (_fcChart){ _fcChart.destroy(); _fcChart=null; }
+      return;
+    }
+
+    // Try to match benchmark controls; else fall back to first slice in file
+    const gpuSel = document.getElementById("bm_gpu")?.value;
+    const regSel = document.getElementById("bm_region")?.value;
+    const typSel = document.getElementById("bm_type")?.value;
+    const durSel = document.getElementById("bm_duration")?.value;
+    const cntSel = Number(document.getElementById("bm_count")?.value);
+
+    let rows = fc.filter(r=> r.gpu===gpuSel && r.region===regSel && r.type===typSel && r.duration===durSel && r.count===cntSel);
+    let used = {gpu:gpuSel, region:regSel, type:typSel, duration:durSel, count:cntSel, matched:true};
+    if (!rows.length){
+      rows = fc.slice(); // take whatever is there
+      used = {gpu:fc[0].gpu, region:fc[0].region, type:fc[0].type, duration:fc[0].duration, count:fc[0].count, matched:false};
+    }
+    rows.sort((a,b)=> new Date(a.date) - new Date(b.date));
+
+    const labels = rows.map(r=>{
+      const d = new Date(r.date);
+      const mm = d.toLocaleString(undefined,{month:'short'});
+      const dd = d.getDate();
+      const hh = String(d.getHours()).padStart(2,'0');
+      return `${mm} ${dd} ${hh}:00`;
+    });
+    const p10 = rows.map(r=>r.p10);
+    const p50 = rows.map(r=>r.p50);
+    const p90 = rows.map(r=>r.p90);
+
+    const ctx = document.getElementById("fc_chart").getContext("2d");
+    if (_fcChart) _fcChart.destroy();
+    // Band fill between p10 and p90 by stacking datasets
+    _fcChart = new Chart(ctx,{
+      type:'line',
       data:{
-        labels: x,
+        labels,
         datasets:[
-          {label:'Normalized Price Distribution', data:y, fill:true, tension:0.35, pointRadius:0, borderWidth:2},
-          {label:'P50', data:x.map(v=> (p50!=null && isFinite(p50) ? (v===x[Math.floor(x.length/2)]?1:NaN) : NaN)), hidden:true}
+          {label:'P10', data:p10, pointRadius:0, borderWidth:1, tension:0.25, fill:false, hidden:true},
+          {label:'P10–P90 band', data:p90, pointRadius:0, borderWidth:0, tension:0.25, fill:{target:0},}, // fills down to dataset 0 (P10)
+          {label:'P50', data:p50, pointRadius:0, borderWidth:2, tension:0.25}
         ]
       },
       options:{
         responsive:true,
         plugins:{ legend:{display:true}},
         scales:{
-          y:{ min:0, max:1, ticks:{ callback:v=>v.toFixed(1)}},
-          x:{ ticks:{ callback:v=>'$'+Number(x[v]).toFixed(2), autoSkip:true, maxRotation:0 } }
+          y:{ ticks:{ callback:v=>"$"+Number(v).toFixed(2)}},
+          x:{ ticks:{ autoSkip:true, maxRotation:0 }}
         },
         interaction:{ mode:'index', intersect:false }
       }
     });
+
+    metaEl.textContent = `${used.gpu} · ${used.region} · ${used.type} · ${used.duration} · ${used.count} GPUs` + (used.matched?"":" (showing available slice)");
+    noteEl.textContent = `Points: ${rows.length}. Band shows P10–P90; line shows P50.`;
   }
 
   // ---------------------- BOOT ----------------------
@@ -674,6 +751,7 @@
 </script>
 </body>
 </html>
+
 
 
 

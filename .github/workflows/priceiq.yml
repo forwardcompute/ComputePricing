@@ -32,22 +32,24 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install papermill jupyter ipykernel nest-asyncio aiohttp requests beautifulsoup4 lxml pandas numpy prophet
+          pip install papermill jupyter ipykernel nest-asyncio aiohttp requests beautifulsoup4 lxml pandas numpy
           pip install playwright
           python -m playwright install --with-deps chromium
           python -m ipykernel install --user --name python3
 
-      - name: Build data (scrape + aggregate + forecast)
+      - name: Build data (scrape + aggregate)
         run: |
+          # Execute your single notebook; outputs land under docs/data/**
           papermill "scrape+formula.ipynb" "docs/last_run.ipynb" -k python3
           echo "Listing derived outputs:"
-          ls -lah docs/data/derived || true
+          ls -lah docs/data || true
 
-      - name: Commit dashboard data (derived + history + latest + forecast)
+      - name: Commit dashboard data (derived + history + latest)
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Price-IQ: update data (derived + history + latest + forecast)"
+          commit_message: "Price-IQ: update data (derived + history + latest)"
           file_pattern: |
             docs/data/**
             docs/last_run.ipynb
+
 

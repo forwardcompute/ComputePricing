@@ -35,6 +35,7 @@
   .stat .val{font-size:28px;font-weight:700}
   .stat .sub{color:var(--sub);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--badge);color:var(--sub);font-size:12px;border:1px solid var(--chipStroke)}
+  .badge.best{background:rgba(39,217,128,0.12); color:#9ff3c8; border-color:rgba(39,217,128,0.25)}
   table{width:100%;border-collapse:separate;border-spacing:0 8px}
   thead th{color:var(--sub);font-weight:600;text-align:left;font-size:12px;padding:0 10px 6px}
   tbody tr{background:var(--row);border:1px solid var(--muted)}
@@ -51,6 +52,9 @@
   .switch input{width:18px;height:18px}
   .control{display:flex;flex-direction:column;gap:6px}
   .control label{font-size:11px;color:var(--sub);padding-left:2px}
+  /* ROI bar */
+  .barWrap{margin-top:6px;height:6px;background:rgba(255,255,255,0.05);border:1px solid var(--chipStroke);border-radius:999px;overflow:hidden}
+  .bar{height:100%;background:linear-gradient(90deg, var(--accent), #89e1ff)}
 </style>
 </head>
 <body>
@@ -124,14 +128,14 @@
     <!-- ROI: Cheapest total cost -->
     <div class="sectionTitle">
       <h3 style="margin:0">ROI (Cheapest total cost)</h3>
-      <span class="small">from <code>roi_comparison.csv</code></span>
+      <span class="small">from <code>roi_comparison.csv</code> · <span id="roiMeta"></span></span>
     </div>
     <div class="card">
       <table id="tbl_roi">
         <thead>
           <tr>
             <th>GPU</th><th>Count</th><th>Duration</th><th>Provider</th>
-            <th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th><th class="right">When</th>
+            <th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -184,8 +188,15 @@
         <div class="control" style="min-width:120px"><label>GPU Count</label>
           <select id="hist_cnt" class="select"><option>All</option><option>1</option><option>2</option><option>4</option><option>8</option><option>16</option><option>32</option><option>64</option></select>
         </div>
-        <div class="control" style="min-width:140px"><label>Range</label>
-          <select id="hist_range" class="select"><option value="all">All days</option><option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option></select>
+        <div class="control" style="min-width:160px"><label>Range</label>
+          <select id="hist_range" class="select">
+            <option value="today">Today</option>
+            <option value="2">Last 2 days</option>
+            <option value="3">Last 3 days</option>
+            <option value="5">Last 5 days</option>
+            <option value="7">Last 7 days</option>
+            <option value="all">All days</option>
+          </select>
         </div>
       </div>
       <canvas id="histChart" height="120"></canvas>
@@ -210,8 +221,8 @@
     </div>
 
     <p class="small" style="margin:16px 4px 40px">
-      Tip: serve this over HTTP (e.g. <code>python -m http.server</code>). Data loads from <code>data/derived/</code> and <code>data/history/</code>.
-      Turn on the debug toggle to see which files were found.
+      Tip: serve over HTTP (e.g. <code>python -m http.server</code>). Data loads from <code>data/derived/</code> and <code>data/history/</code>.
+      Toggle debug to see which files were found.
     </p>
   </div>
 
@@ -303,7 +314,7 @@
         gpu:r.gpu_model, count:Number(r.gpu_count), duration:r.duration,
         provider:r.best_provider, region:r.best_region,
         p:Number(r.price_per_gpu_hr), total:Number(r.total_cost_usd), ts:r.timestamp
-      }));
+      })).filter(r=>isFinite(r.total));
       logDbg(`rows(roi): ${state.roi.length}`);
     }catch(e){ logDbg("roi load error: "+e); }
 
@@ -408,15 +419,28 @@
         <td class="right">${fmt.date(r.ts)}</td>
       </tr>`).join("");
 
-    // ROI table
-    document.querySelector("#tbl_roi tbody").innerHTML = state.roi.map(r=>`
-      <tr>
+    // ROI table (improved: remove When, sort by Total ↑, add relative bar + "best" badge)
+    const roi = [...state.roi].filter(r=>isFinite(r.total));
+    roi.sort((a,b)=> a.total - b.total);
+    const minT = roi.length ? roi[0].total : 0;
+    const maxT = roi.length ? roi[roi.length-1].total : 1;
+    const span  = Math.max(1, maxT - minT);
+
+    document.getElementById("roiMeta").textContent = roi.length ? `sorted by total cost ↑ · ${roi.length} rows` : "no rows";
+
+    document.querySelector("#tbl_roi tbody").innerHTML = roi.map((r,i)=>{
+      const w = Math.max(6, Math.round(((r.total - minT)/span) * 100)); // keep a visible sliver
+      const best = i===0 ? `<span class="badge best">best</span>` : "";
+      return `<tr title="relative vs cheapest: ${w}%">
         <td>${r.gpu}</td><td>${r.count}</td><td>${r.duration}</td>
-        <td>${r.provider}</td><td>${r.region}</td>
+        <td>${r.provider} ${best}</td><td>${r.region}</td>
         <td class="right">${fmt.money(r.p)}</td>
-        <td class="right">${fmt.money0(r.total)}</td>
-        <td class="right">${fmt.date(r.ts)}</td>
-      </tr>`).join("");
+        <td class="right">
+          ${fmt.money0(r.total)}
+          <div class="barWrap"><div class="bar" style="width:${w}%"></div></div>
+        </td>
+      </tr>`;
+    }).join("");
 
     // Snapshot
     const cbody=document.querySelector("#tbl_comp tbody");
@@ -529,13 +553,8 @@
   function providerToCandidates(name){
     const base = name.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
     const parts = base.split(/\s+/);
-    const glued = [
-      parts.join(''),
-      parts.join('-'),
-      parts.join('_')
-    ];
+    const glued = [ parts.join(''), parts.join('-'), parts.join('_') ];
     const extras = [];
-    // common aliases
     if (base.includes('lambda')) extras.push('lambdalabs','lambda_labs','lambda-labs','lambda');
     if (base.includes('crusoe')) extras.push('crusoecloud','crusoe_cloud','crusoe-cloud','crusoe');
     if (base.includes('vast'))   extras.push('vastai','vast_ai','vast-ai');
@@ -546,12 +565,9 @@
     if (base.includes('nebius')) extras.push('nebius');
     if (base.includes('sfcompute') || base.includes('sf compute')) extras.push('sfcompute','sf-compute','sf_compute');
     if (base.includes('hydra') || base.includes('brokkr')) extras.push('brokkr','hydra_host','hydra-host');
-
     const names = [...new Set([...glued, ...extras])];
     const files = [];
-    names.forEach(n=>{
-      files.push(`${n}_history.csv`, `${n}-history.csv`, `${n}.csv`);
-    });
+    names.forEach(n=>{ files.push(`${n}_history.csv`, `${n}-history.csv`, `${n}.csv`); });
     return files;
   }
 
@@ -571,10 +587,7 @@
   }
 
   async function loadHistoryForProvider(provider){
-    // cache key = provider
     if (historyCache.has(provider)) return historyCache.get(provider);
-
-    // try many filename variants until one exists
     const candidates = providerToCandidates(provider);
     for (const file of candidates){
       try{
@@ -591,13 +604,15 @@
         logDbg(`history(${provider}): using file ${file} (${rows.length} rows)`);
         historyCache.set(provider, rows);
         return rows;
-      }catch(e){
-        // try next variant
-      }
+      }catch(e){ /* try next */ }
     }
     logDbg(`history(${provider}): no file found`);
     historyCache.set(provider, []);
     return [];
+  }
+
+  function startOfTodayLocal(){
+    const d=new Date(); d.setHours(0,0,0,0); return d.getTime();
   }
 
   async function renderHistory(){
@@ -608,22 +623,25 @@
     const rng  = document.getElementById("hist_range").value;
 
     let rows = await loadHistoryForProvider(prov);
-    // base filter: GPU + prefer on-demand if available
+    // base: GPU & prefer On-Demand
     let view = rows.filter(r=> r.gpu===gpu && (!r.type || /On-Demand/i.test(r.type)));
-    let stage = `gpu+on-demand=${view.length}`;
-    if (dur!=="All") view = view.filter(r=> String(r.duration||"").toLowerCase()===dur.toLowerCase());
-    if (cnt!=="All") view = view.filter(r=> String(r.count)===String(cnt));
-    stage += ` → +dur/cnt=${view.length}`;
-    // relax if empty
-    if (!view.length){ view = rows.filter(r=> r.gpu===gpu); stage += " (relaxed to GPU only)"; }
-    // range
-    if (rng!=="all"){
-      const days = Number(rng), cut = Date.now()-days*24*3600*1000;
-      view = view.filter(r=> new Date(r.ts).getTime() >= cut);
-      stage += ` → range(${rng})=${view.length}`;
-    }
-    view.sort((a,b)=> new Date(a.ts)-new Date(b.ts));
+    if(dur!=="All") view = view.filter(r=> String(r.duration||"").toLowerCase()===dur.toLowerCase());
+    if(cnt!=="All") view = view.filter(r=> String(r.count)===String(cnt));
+    if(!view.length) view = rows.filter(r=> r.gpu===gpu); // relax
 
+    // range selection
+    if (rng!=="all"){
+      if (rng==="today"){
+        const cut = startOfTodayLocal();
+        view = view.filter(r=> new Date(r.ts).getTime() >= cut);
+      }else{
+        const days = Number(rng);
+        const cut = Date.now() - days*24*3600*1000;
+        view = view.filter(r=> new Date(r.ts).getTime() >= cut);
+      }
+    }
+
+    view.sort((a,b)=> new Date(a.ts)-new Date(b.ts));
     const labels=view.map(r=> String(r.ts).replace("T"," ").replace("Z",""));
     const data  =view.map(r=> r.price);
 
@@ -635,7 +653,7 @@
       options:{ responsive:true, plugins:{ legend:{display:true}}, scales:{ y:{ ticks:{ callback:v=>"$"+Number(v).toFixed(2)}}, x:{ ticks:{ autoSkip:true, maxRotation:0 }}}}
     });
 
-    logDbg(`history filtered: ${stage}`);
+    logDbg(`history filtered: ${view.length} points (${rng})`);
   }
 
   // ---------------------- BOOT ----------------------
@@ -644,6 +662,7 @@
 </script>
 </body>
 </html>
+
 
 
 

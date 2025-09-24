@@ -54,6 +54,11 @@
   .control label{font-size:11px;color:var(--sub);padding-left:2px}
   .barWrap{margin-top:6px;height:6px;background:rgba(255,255,255,0.05);border:1px solid var(--chipStroke);border-radius:999px;overflow:hidden}
   .bar{height:100%;background:linear-gradient(90deg, var(--accent), #89e1ff)}
+  .roiCell{background:var(--row);border:1px solid var(--muted);border-radius:12px;padding:10px;cursor:pointer}
+  .roiCell h4{margin:0 0 6px 0;font-size:13px;color:var(--sub);font-weight:600}
+  .roiCell .prov{font-weight:700}
+  .roiCell .total{font-size:18px;font-weight:800}
+  .gridHead{color:var(--sub);font-size:12px;margin:6px 0}
 </style>
 </head>
 <body>
@@ -122,54 +127,52 @@
       </table>
     </div>
 
-    <!-- ROI (IMPROVED) -->
+    <!-- ROI (IMPROVED GRID) -->
     <div class="sectionTitle">
       <h3 style="margin:0">ROI (Cheapest total cost)</h3>
-      <span class="small">from <code>roi_comparison.csv</code> · <span id="roiMeta"></span></span>
+      <span class="small">from <code>roi_comparison.csv</code></span>
     </div>
-    <div class="card">
-      <table id="tbl_roi">
-        <thead>
-          <tr>
-            <th>GPU</th><th>Count</th><th>Duration</th><th>Provider</th>
-            <th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+    <div class="card" id="roiCard">
+      <div class="controls" style="flex-wrap:wrap;gap:8px;margin-bottom:12px">
+        <div class="control"><label>GPU</label><select id="roi_gpu" class="select" style="min-width:140px"></select></div>
+        <div class="control"><label>Region</label><select id="roi_region" class="select" style="min-width:140px"></select></div>
+        <div class="control"><label>Metric</label>
+          <select id="roi_metric" class="select" style="min-width:160px">
+            <option value="total">Total cost</option>
+            <option value="rate">$/GPU-hr (derived)</option>
+          </select>
+        </div>
+        <div class="control"><label>&nbsp;</label><button id="roi_reset" class="btn clear">Reset</button></div>
+      </div>
+
+      <div class="gridHead">Click a scenario to see Top-3</div>
+      <div id="roi_grid" class="row" style="gap:10px"></div>
+
+      <div id="roi_details" class="card" style="margin-top:12px; display:none">
+        <div class="sectionTitle" style="margin-top:0">
+          <h3 style="margin:0" id="roi_detail_title">Top options</h3>
+          <span class="small" id="roi_detail_meta"></span>
+        </div>
+        <table style="width:100%">
+          <thead>
+            <tr>
+              <th>Provider</th><th>Region</th>
+              <th class="right">$/GPU-hr</th>
+              <th class="right">Total</th>
+            </tr>
+          </thead>
+          <tbody id="roi_detail_body"></tbody>
+        </table>
+      </div>
     </div>
 
-    <!-- QUICK CALC -->
-    <div class="sectionTitle"><h3 style="margin:0">ROI Calculator (quick)</h3></div>
-    <div class="card">
-      <div class="controls" style="flex-wrap:wrap;margin-bottom:10px">
-        <select id="qc_gpu"   class="select" style="min-width:160px"></select>
-        <select id="qc_region"class="select" style="min-width:160px"></select>
-        <select id="qc_count" class="select" style="min-width:120px"></select>
-        <select id="qc_dur"   class="select" style="min-width:160px"></select>
-        <label class="switch small"><input type="checkbox" id="qc_usePred"> Use predictions (P50) if available</label>
-        <button class="btn" id="btnCalc">Calculate</button>
-      </div>
-      <table id="tbl_qc">
-        <thead><tr><th>Provider</th><th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th><th class="right">Source</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <div class="row tileRow" style="margin-top:12px">
-        <div class="card stat"><h4>Predicted price (P10)</h4><div class="val" id="p10">–</div></div>
-        <div class="card stat"><h4>Predicted price (P25)</h4><div class="val" id="p25">–</div></div>
-        <div class="card stat"><h4>Predicted price (P50)</h4><div class="val" id="p50">–</div></div>
-        <div class="card stat"><h4>Predicted price (P75 / P90)</h4><div class="val" id="p7590">– / –</div></div>
-      </div>
-    </div>
-
-    <!-- PRICE BENCHMARK (CROSS-PROVIDER) -->
+    <!-- PRICE BENCHMARK -->
     <div class="sectionTitle">
       <h3 style="margin:0">Price benchmark (cross-provider)</h3>
       <span class="small">from <code>data/derived/provider_scores_latest.csv</code></span>
     </div>
     <div class="card" id="benchCard">
       <div class="row" style="grid-template-columns:320px 1fr; gap:18px">
-        <!-- Controls -->
         <div>
           <div class="control" style="margin-bottom:10px"><label>GPU</label>
             <select id="bm_gpu" class="select"><option>H100</option><option>H200</option></select>
@@ -191,7 +194,6 @@
           <div class="small" style="margin-top:8px;color:var(--sub)">Deal guidance: <span id="bm_deal" class="badge" style="display:none"></span></div>
         </div>
 
-        <!-- Results -->
         <div>
           <div class="row tileRow">
             <div class="card stat"><h4>10% quantile</h4><div class="val" id="bm_p10">–</div></div>
@@ -213,7 +215,7 @@
       </div>
     </div>
 
-    <!-- FORECAST (72h) -->
+    <!-- FORECAST -->
     <div class="sectionTitle">
       <h3 style="margin:0">Forecast (next 72 hours)</h3>
       <span class="small">from <code>forecast.csv</code> · <span id="fcMeta"></span></span>
@@ -287,9 +289,16 @@ window.addEventListener('DOMContentLoaded', () => {
   const uniq = arr => [...new Set(arr)];
   const byNumAsc = key => (a,b)=> (+a[key]||1e12)-(+b[key]||1e12);
 
+  function durToHours(s){
+    const v = String(s||"").toLowerCase();
+    if (/month/.test(v)) return 24*30;
+    if (/week/.test(v))  return 24*7;
+    if (/day/.test(v))   return 24;
+    return 1; // hour
+  }
+
   // ---------------------- ROBUST PATHS ----------------------
   async function tryFetch(url){
-    // simple cache-buster helps on GitHub Pages
     const bust = (url.includes('?') ? '&' : '?') + 'v=' + Date.now();
     const r = await fetch(url + bust,{cache:"no-store"});
     if(!r.ok) throw new Error(r.status+" "+url);
@@ -338,11 +347,37 @@ window.addEventListener('DOMContentLoaded', () => {
 
     try{
       const txt = await (await getDerived(files.roi)).text();
-      state.roi = parseCSV(txt).map(r=>({
-        gpu:r.gpu_model, count:Number(r.gpu_count), duration:r.duration,
-        provider:r.best_provider, region:r.best_region,
-        p:Number(r.price_per_gpu_hr), total:Number(r.total_cost_usd), ts:r.timestamp
-      })).filter(r=>isFinite(r.total));
+      state.roi = parseCSV(txt).map(r=>{
+        const gpu = r.gpu_model;
+        const count = Number(r.gpu_count);
+        const duration = r.duration;
+        const hrs = durToHours(duration);
+        const total = Number(r.total_cost_usd);
+        const csvRate = Number(r.price_per_gpu_hr);
+        // derive rate from total when possible
+        const derived = (isFinite(total) && isFinite(count) && count>0 && hrs>0)
+          ? (total / (count * hrs))
+          : NaN;
+        // if CSV rate exists but differs >1% from derived, trust derived
+        let p_eff = isFinite(derived) ? derived : csvRate;
+        if (isFinite(csvRate) && isFinite(derived)){
+          const diff = Math.abs(csvRate - derived) / Math.max(derived,1e-9);
+          if (diff <= 0.01) p_eff = csvRate; // within 1%, keep csv
+          else p_eff = derived;               // else use derived (fix bad CSV)
+        }
+        return {
+          gpu,
+          count,
+          duration,
+          provider:r.best_provider,
+          region:r.best_region,
+          p_csv: csvRate,
+          p_eff,                // corrected $/GPU-hr to display/use
+          total,
+          hrs,
+          ts:r.timestamp
+        };
+      }).filter(r=>isFinite(r.total));
       logDbg(`rows(roi): ${state.roi.length}`);
     }catch(e){ logDbg("roi load error: "+e); }
 
@@ -371,7 +406,8 @@ window.addEventListener('DOMContentLoaded', () => {
     hydrateAll();
     initQuickCalc();
     initBenchmarkUI();
-    renderForecast(); // after benchmark init, draw forecast (fallback if needed)
+    initROIImproved();       // <<< new
+    renderForecast();        // after benchmark init
   }
 
   // ---------------------- FILTERS + KPI ----------------------
@@ -468,30 +504,6 @@ window.addEventListener('DOMContentLoaded', () => {
         </tr>`).join("");
     }
 
-    // ROI (cleaner)
-    const roi = [...state.roi].filter(r=>isFinite(r.total)).sort((a,b)=> a.total - b.total);
-    const minT = roi.length ? roi[0].total : 0;
-    const maxT = roi.length ? roi[roi.length-1].total : 1;
-    const span  = Math.max(1, maxT - minT);
-    const roiMeta = document.getElementById("roiMeta");
-    if (roiMeta) roiMeta.textContent = roi.length ? `sorted by total cost ↑ · ${roi.length} rows` : "no rows";
-    const roiBody = document.querySelector("#tbl_roi tbody");
-    if (roiBody){
-      roiBody.innerHTML = roi.map((r,i)=>{
-        const w = Math.max(6, Math.round(((r.total - minT)/span) * 100));
-        const best = i===0 ? `<span class="badge best">best</span>` : "";
-        return `<tr title="relative vs cheapest: ${w}%">
-          <td>${r.gpu}</td><td>${r.count}</td><td>${r.duration}</td>
-          <td>${r.provider} ${best}</td><td>${r.region}</td>
-          <td class="right">${fmt.money(r.p)}</td>
-          <td class="right">
-            ${fmt.money0(r.total)}
-            <div class="barWrap"><div class="bar" style="width:${w}%"></div></div>
-          </td>
-        </tr>`;
-      }).join("");
-    }
-
     // Snapshot
     const cbody=document.querySelector("#tbl_comp tbody");
     if (cbody){
@@ -552,14 +564,6 @@ window.addEventListener('DOMContentLoaded', () => {
     runQuickCalc();
   }
 
-  function durToHours(s){
-    const v = String(s||"").toLowerCase();
-    if (v.includes("month")) return 24*30;
-    if (v.includes("week"))  return 24*7;
-    if (v.includes("day"))   return 24;
-    return 1; // hour
-  }
-
   function runQuickCalc(){
     const qc_gpu   = document.getElementById("qc_gpu");
     const qc_region= document.getElementById("qc_region");
@@ -614,17 +618,8 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ---------------------- PRICE BENCHMARK ----------------------
+  // ---------------------- PRICE BENCHMARK (same as before) ----------------------
   function setOptionsPlain(el, arr){ if(el) el.innerHTML = arr.map(v=>`<option>${v}</option>`).join(""); }
-  function quantiles(sortedVals, ps){
-    const n = sortedVals.length; if (!n) return ps.map(()=>NaN);
-    return ps.map(p => {
-      if (n===1) return sortedVals[0];
-      const idx = (n-1)*p, lo=Math.floor(idx), hi=Math.ceil(idx);
-      if (lo===hi) return sortedVals[lo];
-      const w = idx-lo; return sortedVals[lo]*(1-w) + sortedVals[hi]*w;
-    });
-  }
   function kde(values, gridN=160){
     const n=values.length; if(!n) return {x:[], y:[]};
     const mean = values.reduce((a,b)=>a+b,0)/n;
@@ -643,7 +638,6 @@ window.addEventListener('DOMContentLoaded', () => {
     return {x, y: y.map(d=>d/ymax)};
   }
 
-  let _bmChart;
   function initBenchmarkUI(){
     const rows = state.scores;
     const gpus   = [...new Set(rows.map(r=>r.gpu))].sort();
@@ -694,7 +688,6 @@ window.addEventListener('DOMContentLoaded', () => {
     const dur0 = bm_duration.value;
     const cnt0 = bm_count.value;
 
-    // exact slice, then relax progressively
     let sample = state.scores.filter(r=> r.gpu===gpu && r.region===reg0 && r.type===typ0 && r.duration===dur0 && String(r.count)===String(cnt0));
     let note = `exact slice (${sample.length})`;
     if (sample.length < 8) { sample = state.scores.filter(r=> r.gpu===gpu && r.region===reg0 && r.type===typ0 && r.duration===dur0); note="relaxed: drop count"; }
@@ -703,7 +696,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (sample.length < 8) { sample = state.scores.filter(r=> r.gpu===gpu); note="relaxed: GPU only"; }
 
     const vals = sample.map(r=>r.price).filter(Number.isFinite).sort((a,b)=>a-b);
-    const [p10,p25,p50,p75,p90] = (function(sorted, ps){ // quantiles
+    const q = (sorted, ps)=>{
       const n = sorted.length; if (!n) return ps.map(()=>NaN);
       return ps.map(p => {
         if (n===1) return sorted[0];
@@ -711,7 +704,8 @@ window.addEventListener('DOMContentLoaded', () => {
         if (lo===hi) return sorted[lo];
         const w = idx-lo; return sorted[lo]*(1-w) + sorted[hi]*w;
       });
-    })(vals,[0.10,0.25,0.50,0.75,0.90]);
+    };
+    const [p10,p25,p50,p75,p90] = q(vals,[0.10,0.25,0.50,0.75,0.90]);
 
     const money = n => isFinite(n) ? `$${n.toFixed(2)}` : "–";
     const set = (id,txt)=>{ const el=document.getElementById(id); if(el) el.textContent=txt; };
@@ -722,7 +716,6 @@ window.addEventListener('DOMContentLoaded', () => {
     set("bm_p90", money(p90));
     set("bm_big", money(p50));
 
-    // Confidence + note
     let noteTxt = `Samples: ${vals.length} (${note})`;
     let conf = "Low";
     if (isFinite(p50) && isFinite(p25) && isFinite(p75) && vals.length){
@@ -734,30 +727,18 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     set("bm_note", noteTxt);
 
-    // Deal guidance vs cheapest
     const dealEl = document.getElementById("bm_deal");
     if (dealEl){
       dealEl.style.display = "none";
       dealEl.className = "badge";
       if (vals.length && isFinite(p25) && isFinite(p75)){
         const cheapest = vals[0];
-        if (cheapest < p25){
-          dealEl.textContent = "Deal (book now)";
-          dealEl.classList.add("best");
-          dealEl.style.display = "inline-block";
-        } else if (cheapest > p75){
-          dealEl.textContent = "Rich (likely cheaper later)";
-          dealEl.classList.add("warn");
-          dealEl.style.display = "inline-block";
-        } else {
-          dealEl.textContent = "Fair";
-          dealEl.classList.add("badge");
-          dealEl.style.display = "inline-block";
-        }
+        if (cheapest < p25){ dealEl.textContent = "Deal (book now)"; dealEl.classList.add("best"); dealEl.style.display = "inline-block"; }
+        else if (cheapest > p75){ dealEl.textContent = "Rich (likely cheaper later)"; dealEl.classList.add("warn"); dealEl.style.display = "inline-block"; }
+        else { dealEl.textContent = "Fair"; dealEl.style.display = "inline-block"; }
       }
     }
 
-    // KDE chart
     const {x, y} = kde(vals);
     const canvas = document.getElementById("bm_chart");
     if (canvas && window.Chart){
@@ -779,7 +760,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ---------------------- FORECAST (72h) ----------------------
+  // ---------------------- FORECAST ----------------------
   let _fcChart;
   function renderForecast(){
     const fc = state.forecast||[];
@@ -791,7 +772,6 @@ window.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Match benchmark controls; else fall back
     const gpuSel = document.getElementById("bm_gpu")?.value;
     const regSel = document.getElementById("bm_region")?.value;
     const typSel = document.getElementById("bm_type")?.value;
@@ -801,7 +781,7 @@ window.addEventListener('DOMContentLoaded', () => {
     let rows = fc.filter(r=> r.gpu===gpuSel && r.region===regSel && r.type===typSel && r.duration===durSel && r.count===cntSel);
     let used = {gpu:gpuSel, region:regSel, type:typSel, duration:durSel, count:cntSel, matched:true};
     if (!rows.length){
-      rows = fc.slice(); // take whatever is there
+      rows = fc.slice();
       used = {gpu:fc[0].gpu, region:fc[0].region, type:fc[0].type, duration:fc[0].duration, count:fc[0].count, matched:false};
     }
     rows.sort((a,b)=> new Date(a.date) - new Date(b.date));
@@ -828,7 +808,7 @@ window.addEventListener('DOMContentLoaded', () => {
         labels,
         datasets:[
           {label:'P10', data:p10, pointRadius:0, borderWidth:1, tension:0.25, fill:false, hidden:true},
-          {label:'P10–P90 band', data:p90, pointRadius:0, borderWidth:0, tension:0.25, fill:{target:0}}, // fill down to dataset 0 (P10)
+          {label:'P10–P90 band', data:p90, pointRadius:0, borderWidth:0, tension:0.25, fill:{target:0}},
           {label:'P50', data:p50, pointRadius:0, borderWidth:2, tension:0.25}
         ]
       },
@@ -847,6 +827,137 @@ window.addEventListener('DOMContentLoaded', () => {
     if (noteEl) noteEl.textContent = `Points: ${rows.length}. Band shows P10–P90; line shows P50.`;
   }
 
+  // ---------------------- ROI (IMPROVED GRID) ----------------------
+  const DUR_ORDER = ["1 hour","1 day","1 week","1 month"];
+  const COUNT_ORDER = [8,16,32,64];
+
+  function fmtMoney0(n){ return isFinite(n) ? `$${Number(n).toFixed(0)}` : "–"; }
+  function fmtRate2(n){  return isFinite(n) ? `$${Number(n).toFixed(2)}` : "–"; }
+
+  function buildBestByScenario(rows, metric){
+    // metric: "total" | "rate"
+    const key = r => [r.gpu, r.region, r.count, r.duration].join("|");
+    const best = new Map();
+    for (const r of rows){
+      if (!isFinite(r.total) || !isFinite(r.p_eff) || !isFinite(r.count) || !isFinite(r.hrs)) continue;
+      const k = key(r);
+      const cur = best.get(k);
+      const lhs = (metric==="rate") ? r.p_eff : r.total;
+      if (!cur) best.set(k, r);
+      else {
+        const rhs = (metric==="rate") ? cur.p_eff : cur.total;
+        if (lhs < rhs) best.set(k, r);
+      }
+    }
+    return [...best.values()];
+  }
+
+  function initROIImproved(){
+    if (!state.roi?.length) return;
+
+    const gpuSel = document.getElementById("roi_gpu");
+    const regSel = document.getElementById("roi_region");
+    const metSel = document.getElementById("roi_metric");
+    const reset  = document.getElementById("roi_reset");
+    const gridEl = document.getElementById("roi_grid");
+    const detBox = document.getElementById("roi_details");
+    const detTitle = document.getElementById("roi_detail_title");
+    const detMeta  = document.getElementById("roi_detail_meta");
+    const detBody  = document.getElementById("roi_detail_body");
+
+    const gpus = uniq(state.roi.map(r=>r.gpu)).sort();
+    const regs = uniq(state.roi.map(r=>r.region)).sort();
+    if (gpuSel) gpuSel.innerHTML = gpus.map(g=>`<option>${g}</option>`).join("");
+    if (regSel) regSel.innerHTML = ["All", ...regs].map(r=>`<option>${r}</option>`).join("");
+    if (gpuSel) gpuSel.value = gpus.includes("H100") ? "H100" : gpus[0];
+    if (regSel) regSel.value = "All";
+
+    function render(){
+      if (!gridEl) return;
+      const gpu = gpuSel?.value || gpus[0];
+      const region = regSel?.value || "All";
+      const metric = metSel?.value || "total";
+
+      let rows = state.roi.filter(r => r.gpu===gpu);
+      if (region !== "All") rows = rows.filter(r => r.region===region);
+
+      const best = buildBestByScenario(rows, metric);
+
+      const durations = DUR_ORDER.filter(d => best.some(r=>r.duration===d));
+      const counts = COUNT_ORDER.filter(c => best.some(r=>r.count===c));
+
+      if (!durations.length || !counts.length){
+        gridEl.style.display = "block";
+        gridEl.innerHTML = `<div class="small" style="color:var(--sub)">No ROI scenarios match the current filters.</div>`;
+        if (detBox) detBox.style.display = "none";
+        return;
+      }
+
+      // grid: first column labels + one column per count
+      gridEl.style.display = "grid";
+      gridEl.style.gridTemplateColumns = `160px ${counts.map(()=> "1fr").join(" ")}`;
+      // header row
+      let html = `<div></div>${counts.map(c=>`<div class="small" style="color:var(--sub);font-weight:600">Count: ${c}</div>`).join("")}`;
+      // rows
+      for (const d of durations){
+        html += `<div class="small" style="color:var(--sub);font-weight:600">${d}</div>`;
+        for (const c of counts){
+          const cell = best.find(r=> r.duration===d && r.count===c);
+          if (!cell){
+            html += `<div class="roiCell" style="opacity:0.5"><div class="sub">–</div></div>`;
+            continue;
+          }
+          const totalTxt = fmtMoney0(cell.total);
+          const rateTxt  = fmtRate2(cell.p_eff);
+          html += `<div class="roiCell" data-gpu="${cell.gpu}" data-region="${cell.region}" data-count="${c}" data-duration="${d}">
+            <h4>${cell.provider} <span class="small" style="color:var(--sub)">· ${cell.region}</span></h4>
+            <div class="total">${totalTxt}</div>
+            <div class="small" style="color:var(--sub)">${rateTxt} / GPU-hr</div>
+          </div>`;
+        }
+      }
+      gridEl.innerHTML = html;
+
+      // cell clicks -> show top-3
+      gridEl.querySelectorAll('.roiCell').forEach(div=>{
+        div.addEventListener('click', ()=>{
+          const d = div.getAttribute('data-duration');
+          const c = Number(div.getAttribute('data-count'));
+          const reg = div.getAttribute('data-region');
+          const slice = rows.filter(r=> r.duration===d && r.count===c && r.region===reg);
+          // sort by metric
+          slice.sort((a,b)=> (metric==="rate" ? a.p_eff - b.p_eff : a.total - b.total));
+          const top = slice.slice(0,3);
+          if (detTitle) detTitle.textContent = `Top options — ${gpu}, ${c} GPUs, ${d}`;
+          if (detMeta) detMeta.textContent = `${reg} · Metric: ${metric==="rate" ? "$/GPU-hr (derived)" : "Total cost"}`;
+          if (detBody) detBody.innerHTML = top.map(r=>{
+            const w = Math.max(6, Math.round( (r.total / Math.max(top[0].total,1e-9)) * 100 ));
+            return `<tr>
+              <td>${r.provider}</td>
+              <td>${r.region}</td>
+              <td class="right">${fmtRate2(r.p_eff)}</td>
+              <td class="right">
+                ${fmtMoney0(r.total)}
+                <div class="barWrap"><div class="bar" style="width:${w}%"></div></div>
+              </td>
+            </tr>`;
+          }).join("");
+          if (detBox) detBox.style.display = "block";
+        });
+      });
+    }
+
+    [gpuSel, regSel, metSel].forEach(el => el && el.addEventListener('change', render));
+    reset && reset.addEventListener('click', ()=>{
+      if (gpuSel) gpuSel.value = gpus.includes("H100") ? "H100" : gpus[0];
+      if (regSel) regSel.value = "All";
+      if (metSel) metSel.value = "total";
+      render();
+    });
+
+    render();
+  }
+
   // ---------------------- BOOT ----------------------
   loadAll();
 })();
@@ -854,8 +965,6 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
-
-
 
 
 

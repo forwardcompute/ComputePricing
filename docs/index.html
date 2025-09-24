@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Price-IQ</title>
 <link rel="icon" href="data:,">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
 <style>
   :root{
     --bg:#0f1216; --panel:#171b21; --muted:#202532; --text:#e7edf3; --sub:#9fb0c3;
@@ -48,6 +49,10 @@
   .controls{display:flex;gap:8px;align-items:center}
   .switch{display:inline-flex;align-items:center;gap:8px}
   .switch input{width:18px;height:18px}
+
+  /* small tweak: labeled controls in hero/history */
+  .control{display:flex;flex-direction:column;gap:6px}
+  .control label{font-size:11px;color:var(--sub);padding-left:2px}
 </style>
 </head>
 <body>
@@ -58,14 +63,14 @@
       <div class="updated" id="asOf">Updated: —</div>
     </header>
 
-    <!-- HERO FILTERS -->
+    <!-- HERO FILTERS (with labels for clarity) -->
     <div class="row hero">
-      <select id="f_gpu" class="select"></select>
-      <select id="f_region" class="select"></select>
-      <select id="f_type" class="select"></select>
-      <select id="f_duration" class="select"></select>
-      <select id="f_count" class="select"></select>
-      <button class="btn clear" id="btnClear">Clear</button>
+      <div class="control"><label>GPU</label><select id="f_gpu" class="select"></select></div>
+      <div class="control"><label>Region</label><select id="f_region" class="select"></select></div>
+      <div class="control"><label>Type</label><select id="f_type" class="select"></select></div>
+      <div class="control"><label>Duration</label><select id="f_duration" class="select"></select></div>
+      <div class="control"><label>GPU Count</label><select id="f_count" class="select"></select></div>
+      <div class="control"><label>&nbsp;</label><button class="btn clear" id="btnClear">Clear</button></div>
     </div>
 
     <!-- KPI TILES -->
@@ -92,16 +97,14 @@
       </div>
     </div>
 
-    <!-- DATA STATUS (hidden by default; use the toggle to show) -->
+    <!-- DATA STATUS (toggle) -->
     <div class="sectionTitle" style="margin-top:18px">
       <div class="switch small">
         <input type="checkbox" id="toggleDebug">
         <label for="toggleDebug">Show data status (debug)</label>
       </div>
     </div>
-    <div class="card debug" id="debugPanel">
-      <div id="debugLines" class="small"></div>
-    </div>
+    <div class="card debug" id="debugPanel"><div id="debugLines" class="small"></div></div>
 
     <!-- LEADERBOARD -->
     <div class="sectionTitle">
@@ -167,6 +170,56 @@
       </div>
     </div>
 
+    <!-- NEW: Provider History (H100/H200) -->
+    <div class="sectionTitle">
+      <h3 style="margin:0">Provider history</h3>
+      <span class="small">from <code>docs/data/history/*.csv</code></span>
+    </div>
+    <div class="card">
+      <div class="controls" style="flex-wrap:wrap;margin-bottom:8px">
+        <div class="control" style="min-width:200px">
+          <label>Provider</label>
+          <select id="hist_provider" class="select"></select>
+        </div>
+        <div class="control" style="min-width:140px">
+          <label>GPU</label>
+          <select id="hist_gpu" class="select">
+            <option value="H100">H100</option>
+            <option value="H200">H200</option>
+          </select>
+        </div>
+        <div class="control" style="min-width:140px">
+          <label>Duration</label>
+          <select id="hist_dur" class="select">
+            <option>All</option>
+            <option>1h</option>
+            <option>1 hour</option>
+            <option>1 day</option>
+            <option>1 week</option>
+            <option>1 month</option>
+          </select>
+        </div>
+        <div class="control" style="min-width:120px">
+          <label>GPU Count</label>
+          <select id="hist_cnt" class="select">
+            <option>All</option>
+            <option>1</option><option>2</option><option>4</option><option>8</option>
+            <option>16</option><option>32</option><option>64</option>
+          </select>
+        </div>
+        <div class="control" style="min-width:140px">
+          <label>Range</label>
+          <select id="hist_range" class="select">
+            <option value="all">All days</option>
+            <option value="7">Last 7 days</option>
+            <option value="14">Last 14 days</option>
+            <option value="30">Last 30 days</option>
+          </select>
+        </div>
+      </div>
+      <canvas id="histChart" height="120"></canvas>
+    </div>
+
     <!-- COMPUTE CALC SNAPSHOT -->
     <div class="sectionTitle">
       <h3 style="margin:0">Compute Calculator Snapshot</h3>
@@ -186,13 +239,13 @@
     </div>
 
     <p class="small" style="margin:16px 4px 40px">
-      Tip: data loads from <code>docs/data/derived/*.csv</code>. If a section is empty, check your CI run & artifact paths.
+      Tip: data loads from <code>docs/data/derived/*.csv</code> and <code>docs/data/history/*.csv</code>. If a section is empty, check your CI run & artifact paths.
     </p>
   </div>
 
 <script>
 (function(){
-  // ------- Utils -------
+  // ======== Utils ========
   const fmt = {
     money:n=> n==null||isNaN(n) ? '–' : `$${Number(n).toFixed(2)}`,
     money0:n=> n==null||isNaN(n) ? '–' : `$${Number(n).toFixed(0)}`,
@@ -209,8 +262,7 @@
   const parseCSV=(txt)=>{
     const lines=txt.trim().split(/\r?\n/);
     const cols=lines.shift().split(",").map(h=>h.trim());
-    return lines.map(line=>{
-      // very light parser (no embedded commas in our files)
+    return lines.filter(Boolean).map(line=>{
       const cells=line.split(",").map(s=>s.trim());
       const obj={}; cols.forEach((c,i)=>obj[c]=cells[i]??"");
       return obj;
@@ -218,9 +270,9 @@
   };
   const uniq = arr => [...new Set(arr)];
   const byNumAsc = key => (a,b)=> (+a[key]||1e9)-(+b[key]||1e9);
-  const byNumDesc= key => (a,b)=> (+b[key]||-1e9)-(+a[key]||-1e9);
+  function numify(x){ return x==null ? NaN : Number(String(x).replace(/[^\d.\-]/g,"")); }
 
-  // ------- Data paths -------
+  // ======== Data paths (derived) ========
   const PATHS_PRIMARY = "docs/data/derived/";
   const PATHS_FALLBACK = "data/derived/";
   const files = {
@@ -230,38 +282,37 @@
     snap   : "compute_calculator_snapshot.csv",
     market : "market_index.csv"
   };
-  let basePath = PATHS_PRIMARY;
+  async function tryFetch(path){ const r=await fetch(path,{cache:"no-store"}); if(!r.ok) throw new Error(r.status); return r; }
+  async function get(path){ try { return await tryFetch(PATHS_PRIMARY+path);} catch{ return await tryFetch(PATHS_FALLBACK+path);} }
 
-  async function tryFetch(path){
-    const res = await fetch(path, {cache:"no-store"});
-    if(!res.ok) throw new Error(res.status);
-    return res;
-  }
-  async function get(path){
-    try { return await tryFetch(PATHS_PRIMARY + path); }
-    catch { basePath = PATHS_FALLBACK; return await tryFetch(PATHS_FALLBACK + path); }
-  }
+  // ======== Data paths (history) ========
+  const HIST_PRIMARY="docs/data/history/", HIST_FALLBACK="data/history/";
+  async function getHist(path){ try { return await tryFetch(HIST_PRIMARY+path);} catch{ return await tryFetch(HIST_FALLBACK+path);} }
 
-  // ------- Load all -------
+  // Map display provider -> history filename
+  const HISTORY_FILES = [
+    {name:"Vast.ai",               file:"vastai_history.csv"},
+    {name:"VoltagePark",           file:"voltagepark_history.csv"},
+    {name:"TensorDock",            file:"tensordock_history.csv"},
+    {name:"SFCompute",             file:"sfcompute_history.csv"},
+    {name:"Runpod",                file:"runpod_history.csv"},
+    {name:"Paperspace",            file:"paperspace_history.csv"},
+    {name:"Nebius",                file:"nebius_history.csv"},
+    {name:"Lambda Labs",           file:"lambda_labs_history.csv"},
+    {name:"CrusoeCloud",           file:"crusoecloud_history.csv"},
+    {name:"Hydra Host (Brokkr)",   file:"brokkr_history.csv"}
+  ];
+  const historyCache = new Map(); // file -> parsed rows
+
+  // ======== State ========
   const state = {
     scores:[], roi:[], predict:null, snap:[], market:[],
     filters: {gpu:"All", region:"All", type:"On-Demand", duration:"All", count:"All"}
   };
 
-  function numify(x){
-    if(x==null) return NaN;
-    return Number(String(x).replace(/[^\d.\-]/g,""));
-  }
-
-  function safeGet(obj, path, def=null){
-    try{
-      return path.split(".").reduce((o,k)=>o && (k in o)? o[k] : null, obj) ?? def;
-    }catch{ return def; }
-  }
-
+  // ======== Load derived data ========
   async function loadAll(){
-    const debug = [];
-    // provider scores
+    const debug=[];
     try{
       const txt = await (await get(files.scores)).text();
       const rows = parseCSV(txt).map(r=>({
@@ -271,153 +322,123 @@
         score: r.priceiq_score ? Number(r.priceiq_score) : null,
         ts: r.timestamp
       })).filter(r=>isFinite(r.price));
-      state.scores = rows;
-      debug.push(`✅ Loaded ${files.scores} (${rows.length} rows)`);
-    }catch(e){ debug.push(`⚠️ Failed ${files.scores}`); }
+      state.scores=rows; debug.push(`✅ ${files.scores} (${rows.length})`);
+    }catch(e){ debug.push(`❌ ${files.scores}`); }
 
-    // roi
     try{
       const txt = await (await get(files.roi)).text();
-      const rows = parseCSV(txt).map(r=>({
+      state.roi = parseCSV(txt).map(r=>({
         gpu:r.gpu_model, count:Number(r.gpu_count), duration:r.duration,
         provider:r.best_provider, region:r.best_region,
-        p: Number(r.price_per_gpu_hr), total:Number(r.total_cost_usd), ts:r.timestamp
+        p:Number(r.price_per_gpu_hr), total:Number(r.total_cost_usd), ts:r.timestamp
       }));
-      state.roi = rows;
-      debug.push(`✅ Loaded ${files.roi} (${rows.length} rows)`);
-    }catch(e){ debug.push(`⚠️ Failed ${files.roi}`); }
+      debug.push(`✅ ${files.roi} (${state.roi.length})`);
+    }catch(e){ debug.push(`❌ ${files.roi}`); }
 
-    // predict
-    try{
-      state.predict = await (await get(files.predict)).json();
-      debug.push(`✅ Loaded ${files.predict}`);
-    }catch(e){ debug.push(`⚠️ Failed ${files.predict}`); }
+    try{ state.predict = await (await get(files.predict)).json(); debug.push(`✅ ${files.predict}`);}
+    catch(e){ debug.push(`ℹ️ ${files.predict} not found (ok)`); }
 
-    // snapshot
-    try{
-      const txt = await (await get(files.snap)).text();
-      const rows = parseCSV(txt);
-      state.snap = rows;
-      debug.push(`✅ Loaded ${files.snap} (${rows.length} rows)`);
-    }catch(e){ debug.push(`⚠️ Failed ${files.snap}`); }
-
-    // market (optional)
-    try{
-      const txt = await (await get(files.market)).text();
-      const rows = parseCSV(txt);
-      state.market = rows;
-      debug.push(`✅ Loaded ${files.market} (${rows.length} rows)`);
-    }catch(e){ debug.push(`ℹ️ Skipped ${files.market}`); }
+    try{ const txt=await (await get(files.snap)).text(); state.snap=parseCSV(txt); debug.push(`✅ ${files.snap} (${state.snap.length})`);}
+    catch(e){ debug.push(`❌ ${files.snap}`); }
 
     document.getElementById("debugLines").innerHTML = debug.map(s=>`<div>${s}</div>`).join("");
-
     initFilters();
     hydrateAll();
+    initHistoryUI(); // after we know providers
   }
 
-  // ------- Filters -------
+  // ======== Filters ========
   function setOptions(el, arr, withAll=true){
-    el.innerHTML = "";
+    el.innerHTML="";
     const vals = withAll? ["All",...arr]: arr;
-    for(const v of vals){
-      const opt = document.createElement("option");
-      opt.value=v; opt.textContent=v;
-      el.appendChild(opt);
-    }
+    for(const v of vals){ const o=document.createElement("option"); o.value=v; o.textContent=v; el.appendChild(o); }
   }
-
   function initFilters(){
-    const gpuSel     = document.getElementById("f_gpu");
-    const regionSel  = document.getElementById("f_region");
-    const typeSel    = document.getElementById("f_type");
-    const durSel     = document.getElementById("f_duration");
-    const countSel   = document.getElementById("f_count");
+    const gpuSel=document.getElementById("f_gpu");
+    const regionSel=document.getElementById("f_region");
+    const typeSel=document.getElementById("f_type");
+    const durSel=document.getElementById("f_duration");
+    const countSel=document.getElementById("f_count");
 
-    setOptions(gpuSel,    uniq(state.scores.map(r=>r.gpu)).sort());
-    setOptions(regionSel, uniq(state.scores.map(r=>r.region)).sort());
-    setOptions(typeSel,   uniq(state.scores.map(r=>r.type)).sort());
-    setOptions(durSel,    uniq(state.scores.map(r=>r.duration)).sort());
-    setOptions(countSel,  uniq(state.scores.map(r=>r.count).filter(Boolean)).sort((a,b)=>a-b));
+    const gpus=uniq(state.scores.map(r=>r.gpu)).sort();
+    const regs=uniq(state.scores.map(r=>r.region)).sort();
+    const types=uniq(state.scores.map(r=>r.type)).sort();
+    const durs=uniq(state.scores.map(r=>r.duration)).sort();
 
-    gpuSel.value = "All"; regionSel.value="All"; typeSel.value="On-Demand"; durSel.value="All"; countSel.value="All";
-    for(const [el,key] of [[gpuSel,"gpu"],[regionSel,"region"],[typeSel,"type"],[durSel,"duration"],[countSel,"count"]]){
-      el.addEventListener("change", ()=>{ state.filters[key]=el.value; hydrateAll(); });
-    }
-    document.getElementById("btnClear").onclick = ()=>{
-      gpuSel.value="All"; regionSel.value="All"; typeSel.value="All"; durSel.value="All"; countSel.value="All";
-      state.filters={gpu:"All",region:"All",type:"All",duration:"All",count:"All"}; hydrateAll();
+    setOptions(gpuSel,gpus);
+    setOptions(regionSel,regs);
+    setOptions(typeSel,types);
+    setOptions(durSel,durs);
+    setOptions(countSel, uniq(state.scores.map(r=>r.count).filter(Boolean)).sort((a,b)=>a-b));
+
+    // sensible defaults for clarity
+    gpuSel.value = gpus.includes("H100") ? "H100" : "All";
+    typeSel.value = types.includes("On-Demand") ? "On-Demand" : "All";
+    regionSel.value="All"; durSel.value="All"; countSel.value="All";
+    state.filters={gpu:gpuSel.value, region:"All", type:typeSel.value, duration:"All", count:"All"};
+
+    [gpuSel,regionSel,typeSel,durSel,countSel].forEach((el,i)=>{
+      const keys=["gpu","region","type","duration","count"]; const k=keys[i];
+      el.addEventListener("change", ()=>{ state.filters[k]=el.value; hydrateAll(); });
+    });
+    document.getElementById("btnClear").onclick=()=>{
+      gpuSel.value = gpus.includes("H100") ? "H100" : "All";
+      regionSel.value="All"; typeSel.value=types.includes("On-Demand") ? "On-Demand" : "All";
+      durSel.value="All"; countSel.value="All";
+      state.filters={gpu:gpuSel.value, region:"All", type:typeSel.value, duration:"All", count:"All"};
+      hydrateAll();
     };
 
-    // quick calc selects reuse lists
-    setOptions(document.getElementById("qc_gpu"), uniq(state.scores.map(r=>r.gpu)).sort(), false);
-    setOptions(document.getElementById("qc_region"), uniq(state.scores.map(r=>r.region)).sort(), false);
-    setOptions(document.getElementById("qc_count"), [8,16,32,64], false);
-    setOptions(document.getElementById("qc_dur"), ["1 hour","1 day","1 week","1 month"], false);
-    document.getElementById("btnCalc").onclick = runQuickCalc;
-
-    // debug toggle
-    document.getElementById("toggleDebug").addEventListener("change", (e)=>{
-      document.getElementById("debugPanel").classList.toggle("on", e.target.checked);
-    });
-
-    // as-of time
-    const asof = safeGet(state.predict,"asof_utc", null);
-    document.getElementById("asOf").textContent = "Updated: " + (asof ? fmt.date(asof) : new Date().toISOString().replace('T',' ').replace('Z',''));
+    const latest = state.scores.map(r=>r.ts).filter(Boolean).sort().pop();
+    document.getElementById("asOf").textContent = "Updated: " + (latest ? fmt.date(latest) : new Date().toISOString().replace('T',' ').replace('Z',''));
   }
 
-  // ------- Apply filters -------
   function applyFilters(rows){
-    const f = state.filters;
+    const f=state.filters;
     return rows.filter(r=>
-      (f.gpu==="All"     || r.gpu===f.gpu) &&
-      (f.region==="All"  || r.region===f.region) &&
-      (f.type==="All"    || r.type===f.type) &&
-      (f.duration==="All"|| r.duration===f.duration) &&
-      (f.count==="All"   || String(r.count)===String(f.count))
+      (f.gpu==="All"||r.gpu===f.gpu) &&
+      (f.region==="All"||r.region===f.region) &&
+      (f.type==="All"||r.type===f.type) &&
+      (f.duration==="All"||r.duration===f.duration) &&
+      (f.count==="All"|| String(r.count)===String(f.count))
     );
   }
 
-  // ------- KPIs, tables -------
+  // ======== Populate UI ========
   function hydrateAll(){
-    // Leaderboard filtered
-    const rows = applyFilters(state.scores).sort(byNumAsc("price"));
+    const rows=applyFilters(state.scores).sort(byNumAsc("price"));
     document.getElementById("kpi_rows").textContent = rows.length;
 
-    // KPIs
     if(rows.length){
-      const lo = rows[0];
-      document.getElementById("kpi_low").textContent = fmt.money(lo.price);
-      document.getElementById("kpi_low_sub").textContent = `${lo.provider} · ${lo.region} · ${lo.gpu} (${lo.type})`;
-      const prices = rows.map(r=>r.price).filter(x=>isFinite(x)).sort((a,b)=>a-b);
-      const mid = prices[Math.floor(prices.length/2)];
-      document.getElementById("kpi_med").textContent = fmt.money(mid);
-      document.getElementById("kpi_med_sub").textContent = `${rows.length} quotes`;
-      const provs = uniq(rows.map(r=>r.provider)).length;
-      document.getElementById("kpi_prov").textContent = provs;
+      const lo=rows[0];
+      document.getElementById("kpi_low").textContent=fmt.money(lo.price);
+      document.getElementById("kpi_low_sub").textContent=`${lo.provider} · ${lo.region} · ${lo.gpu} (${lo.type})`;
+      const prices=rows.map(r=>r.price).filter(isFinite).sort((a,b)=>a-b);
+      const mid=prices[Math.floor(prices.length/2)];
+      document.getElementById("kpi_med").textContent=fmt.money(mid);
+      document.getElementById("kpi_med_sub").textContent=`${rows.length} quotes`;
+      document.getElementById("kpi_prov").textContent=uniq(rows.map(r=>r.provider)).length;
     }else{
-      for(const id of ["kpi_low","kpi_med","kpi_prov"]){ document.getElementById(id).textContent="–"; }
+      ["kpi_low","kpi_med","kpi_prov"].forEach(id=>document.getElementById(id).textContent="–");
       document.getElementById("kpi_low_sub").textContent="";
       document.getElementById("kpi_med_sub").textContent="";
     }
 
-    // Leaderboard table
-    const tbody = document.querySelector("#tbl_leader tbody");
+    // leaderboard
+    const tbody=document.querySelector("#tbl_leader tbody");
     tbody.innerHTML = rows.map(r=>`
       <tr>
-        <td>${r.provider}</td>
-        <td>${r.region}</td>
-        <td>${r.gpu}</td>
+        <td>${r.provider}</td><td>${r.region}</td><td>${r.gpu}</td>
         <td><span class="pill">${r.type}</span></td>
         <td>${r.duration||"–"}</td>
         <td>${r.count!=null? r.count : "–"}</td>
         <td class="right">${fmt.money(r.price)}</td>
         <td class="right">${r.score!=null? Number(r.score).toFixed(1):"–"}</td>
         <td class="right">${fmt.date(r.ts)}</td>
-      </tr>
-    `).join("");
+      </tr>`).join("");
 
-    // ROI table (simple — show all rows, no filter interaction)
-    const rbody = document.querySelector("#tbl_roi tbody");
+    // ROI
+    const rbody=document.querySelector("#tbl_roi tbody");
     rbody.innerHTML = state.roi.map(r=>`
       <tr>
         <td>${r.gpu}</td><td>${r.count}</td><td>${r.duration}</td>
@@ -427,8 +448,8 @@
         <td class="right">${fmt.date(r.ts)}</td>
       </tr>`).join("");
 
-    // Compute calculator snapshot
-    const cbody = document.querySelector("#tbl_comp tbody");
+    // Snapshot table
+    const cbody=document.querySelector("#tbl_comp tbody");
     cbody.innerHTML = state.snap.map(r=>{
       const lo = r.price_lo ?? r.price_lo_usd ?? r.lo;
       const md = r.price_md ?? r.price_md_usd ?? r.md;
@@ -449,7 +470,7 @@
       </tr>`;
     }).join("");
 
-    // Predictions tiles (from last snapshot)
+    // Predict tiles (if snapshot exists)
     const pp = state.predict||{};
     const moneyOrDash = v => (v==null||isNaN(v)) ? "–" : `$${Number(v).toFixed(2)}`;
     document.getElementById("p10").textContent  = moneyOrDash(pp.p10);
@@ -458,6 +479,7 @@
     document.getElementById("p7590").textContent= `${moneyOrDash(pp.p75||pp.p50)} / ${moneyOrDash(pp.p90)}`
   }
 
+  // ======== Quick calc ========
   function runQuickCalc(){
     const gpu  = document.getElementById("qc_gpu").value;
     const reg  = document.getElementById("qc_region").value;
@@ -466,9 +488,7 @@
     const hours= toHours(durS) || 0;
     const usePred = document.getElementById("qc_usePred").checked;
 
-    // candidate rows
-    let rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && r.type.match(/On-Demand/i));
-    // compute total cost by provider using min observed price
+    let rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && /On-Demand/i.test(r.type));
     const byProv = new Map();
     rows.forEach(r=>{
       const key = r.provider+"|"+r.region;
@@ -477,35 +497,118 @@
     });
 
     let out = [...byProv.values()].map(r=>({
-      provider:r.provider, region:r.region, price:r.price,
-      total: r.price * cnt * hours, src:"observed"
+      provider:r.provider, region:r.region, price:r.price, total: r.price * cnt * hours, src:"observed"
     }));
 
-    // overlay prediction as a synthetic row if asked
     if(usePred && state.predict && state.predict.gpu_model===gpu && state.predict.region===reg && state.predict.p50){
-      out.push({
-        provider:"Predicted (P50)", region:state.predict.used_region||reg,
-        price:Number(state.predict.p50),
-        total:Number(state.predict.p50)*cnt*hours, src:"predicted"
-      });
+      out.push({ provider:"Predicted (P50)", region:reg, price:Number(state.predict.p50), total:Number(state.predict.p50)*cnt*hours, src:"predicted" });
     }
 
     out.sort((a,b)=>a.total-b.total);
-    const tbody = document.querySelector("#tbl_qc tbody");
-    tbody.innerHTML = out.map(r=>`
-      <tr>
-        <td>${r.provider}</td><td>${r.region}</td>
-        <td class="right">${fmt.money(r.price)}</td>
-        <td class="right">${fmt.money0(r.total)}</td>
-        <td class="right"><span class="badge">${r.src}</span></td>
-      </tr>`).join("");
+    document.querySelector("#tbl_qc tbody").innerHTML = out.map(r=>`
+      <tr><td>${r.provider}</td><td>${r.region}</td>
+      <td class="right">${fmt.money(r.price)}</td>
+      <td class="right">${fmt.money0(r.total)}</td>
+      <td class="right"><span class="badge">${r.src}</span></td></tr>`).join("");
+  }
+  document.getElementById("btnCalc").addEventListener("click", runQuickCalc);
+
+  // ======== Provider history (Chart.js) ========
+  function initHistoryUI(){
+    const providerSel = document.getElementById("hist_provider");
+    // Offer only providers that have history files
+    const availableNames = HISTORY_FILES.map(h=>h.name);
+    const namesInScores = uniq(state.scores.map(r=>r.provider)).filter(n=>availableNames.includes(n));
+    const list = namesInScores.length ? namesInScores : availableNames; // fallback
+    providerSel.innerHTML = list.map(n=>`<option>${n}</option>`).join("");
+    providerSel.value = list[0] || "Vast.ai";
+
+    // Set sensible GPU default from top filters
+    const gpuSel=document.getElementById("hist_gpu");
+    if (state.filters.gpu==="H200") gpuSel.value="H200"; else gpuSel.value="H100";
+
+    ["hist_provider","hist_gpu","hist_dur","hist_cnt","hist_range"].forEach(id=>{
+      document.getElementById(id).addEventListener("change", renderHistory);
+    });
+    renderHistory();
   }
 
+  async function renderHistory(){
+    const prov = document.getElementById("hist_provider").value;
+    const gpu  = document.getElementById("hist_gpu").value;
+    const dur  = document.getElementById("hist_dur").value;
+    const cnt  = document.getElementById("hist_cnt").value;
+    const range= document.getElementById("hist_range").value;
+
+    const entry = HISTORY_FILES.find(h=>h.name===prov);
+    if(!entry){ console.warn("No history mapping for", prov); return; }
+
+    let rows = historyCache.get(entry.file);
+    if(!rows){
+      try{
+        const txt = await (await getHist(entry.file)).text();
+        rows = parseCSV(txt).map(r=>({
+          provider:r.provider || prov,
+          region:r.region,
+          gpu:r.gpu_model,
+          type:r.type,
+          duration:r.duration,
+          count: r.gpu_count ? Number(r.gpu_count) : null,
+          price: Number(r.price_hourly_usd ?? r.price_usd ?? r.price),
+          ts: r.fetched_at_utc || r.timestamp || r.fetched_at
+        })).filter(r=>r.price && r.ts);
+        historyCache.set(entry.file, rows);
+      }catch(e){
+        console.warn("Failed to load history", entry.file, e);
+        rows = [];
+      }
+    }
+
+    // Filter
+    let view = rows.filter(r=> r.gpu===gpu && (/On-Demand/i.test(r.type) || r.type==="On-Demand" || !r.type));
+    if(dur!=="All") view = view.filter(r=> (r.duration||"").toLowerCase()===dur.toLowerCase());
+    if(cnt!=="All") view = view.filter(r=> String(r.count)===String(cnt));
+
+    // Date range
+    if(range!=="all"){
+      const days = Number(range);
+      const cutoff = Date.now() - days*24*3600*1000;
+      view = view.filter(r=> new Date(r.ts).getTime() >= cutoff);
+    }
+
+    view.sort((a,b)=> new Date(a.ts) - new Date(b.ts));
+
+    const labels = view.map(r=> r.ts.replace("T"," ").replace("Z",""));
+    const data   = view.map(r=> r.price);
+
+    const ctx=document.getElementById("histChart").getContext("2d");
+    if(window._histChart) window._histChart.destroy();
+    window._histChart = new Chart(ctx, {
+      type:'line',
+      data:{ labels, datasets:[{ label:`${prov} · ${gpu}${dur!=="All" ? " · "+dur : ""}${cnt!=="All" ? " · "+cnt+" GPUs" : ""}`, data, tension:0.2 }]},
+      options:{
+        responsive:true,
+        plugins:{ legend:{display:true}},
+        scales:{
+          y:{ ticks:{ callback:v=>"$"+Number(v).toFixed(2)}},
+          x:{ ticks:{ maxRotation:0, autoSkip:true } }
+        }
+      }
+    });
+  }
+
+  // ======== Boot ========
   loadAll();
+
+  // debug toggle
+  document.getElementById("toggleDebug").addEventListener("change", (e)=>{
+    document.getElementById("debugPanel").classList.toggle("on", e.target.checked);
+  });
 })();
 </script>
 </body>
 </html>
+
 
 
 

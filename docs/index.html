@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Price-IQ</title>
 <link rel="icon" href="data:,">
+<!-- Chart.js for the forecast chart -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
   :root{
@@ -25,7 +26,8 @@
   .tileRow{grid-template-columns:repeat(4,1fr)}
   @media (max-width:980px){ .hero{grid-template-columns:1fr 1fr} .tileRow{grid-template-columns:1fr 1fr}}
   .card{background:var(--panel);border:1px solid var(--muted);border-radius:14px;padding:12px}
-  .select, .btn, .inp{width:100%;appearance:none;background:var(--chip);border:1px solid var(--chipStroke);color:var(--text);padding:10px 12px;border-radius:10px}
+  .select, .btn, .inp{width:100%;appearance:none;background:var(--chip);border:1px solid var(--chipStroke);color:var(--text);padding:10px 12px;border-radius:10px;outline:none;transition:border-color .12s ease}
+  .select:focus{border-color:#3b82f6}
   .btn{cursor:pointer}
   .btn.clear{background:#1d2430;border-color:#2a3244}
   .stat{display:flex;flex-direction:column;gap:6px}
@@ -47,20 +49,17 @@
   .controls{display:flex;gap:8px;align-items:center}
   .switch{display:inline-flex;align-items:center;gap:8px}
   .switch input{width:18px;height:18px}
-  /* nicer selects */
-  .select{outline:none;transition:border-color .12s ease}
-  .select:focus{border-color:#3b82f6}
 </style>
 </head>
 <body>
   <div class="wrap">
     <header>
       <h1>Price-IQ</h1>
-      <span class="small">Auto-generated from <code>docs/data/derived/</code></span>
+      <span class="small">Auto-generated from <code>data/derived/</code></span>
       <div class="updated" id="asOf">Updated: —</div>
     </header>
 
-    <!-- CLEAN HERO FILTERS (default to H100 / On-Demand / 1h if available) -->
+    <!-- CLEAN HERO FILTERS -->
     <div class="row hero">
       <select id="f_gpu" class="select" title="GPU"></select>
       <select id="f_type" class="select" title="Type"></select>
@@ -135,64 +134,76 @@
       </div>
     </div>
 
-    <!-- FORECAST (30-day Prophet) -->
+    <!-- FORECAST -->
     <div class="sectionTitle"><h3 style="margin:0">Forecast (30 days)</h3><span class="small">from <code>forecast.csv</code></span></div>
     <div class="card"><canvas id="forecastChart" height="120"></canvas></div>
 
     <p class="small" style="margin:16px 4px 40px">
-      Tip: data loads from <code>docs/data/derived/*.csv</code>. If a section is empty, check your CI run & artifact paths.
+      Tip: serve via GitHub Pages or a local server (fetch() won’t work on file://).
     </p>
   </div>
 
 <script>
 (function(){
-  // ---------- helpers ----------
+  // ========= helpers =========
   const fmt = {
     money:n=> n==null||isNaN(n) ? '–' : `$${Number(n).toFixed(2)}`,
     money0:n=> n==null||isNaN(n) ? '–' : `$${Number(n).toFixed(0)}`,
     num:n  => n==null||isNaN(n) ? '–' : Number(n).toLocaleString(),
     date:s => s? String(s).replace('T',' ').replace('Z',''): '–'
   };
-  const parseCSV=(txt)=>{
-    const lines=txt.trim().split(/\r?\n/);
-    const cols=lines.shift().split(",").map(h=>h.trim());
+  const norm = s => (s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+
+  // very light CSV parser (your files don't use quoted commas)
+  function parseCSV(txt){
+    const lines = txt.trim().split(/\r?\n/);
+    if(!lines.length) return [];
+    const cols = lines.shift().split(",").map(h=>h.trim());
     return lines.filter(Boolean).map(line=>{
       const cells=line.split(",").map(s=>s.trim());
       const obj={}; cols.forEach((c,i)=>obj[c]=cells[i]??"");
       return obj;
     });
-  };
+  }
+
   const uniq = arr => [...new Set(arr)];
   const byNumAsc = key => (a,b)=> (+a[key]||1e9)-(+b[key]||1e9);
-  const norm = s => (s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+  function numify(x){ if(x==null) return NaN; return Number(String(x).replace(/[^\d.\-]/g,"")); }
 
-  const PATH = "docs/data/derived/";
+  // ========= data base path (auto-detect) =========
   const files = {
-    scores : "provider_scores_latest.csv",
-    roi    : "roi_comparison.csv",
-    predict: "price_predict_snapshot.json",   // optional
-    snap   : "compute_calculator_snapshot.csv",
-    forecast: "forecast.csv"
+    scores   : "provider_scores_latest.csv",
+    roi      : "roi_comparison.csv",
+    predict  : "price_predict_snapshot.json", // optional
+    snap     : "compute_calculator_snapshot.csv",
+    forecast : "forecast.csv"
   };
-
+  let BASE=null;
+  const CANDIDATES=["data/derived/","docs/data/derived/","./data/derived/","./docs/data/derived/"];
+  async function resolveBase(){
+    for(const b of CANDIDATES){
+      try{ const r = await fetch(b+files.scores,{cache:"no-store"}); if(r.ok) return b; } catch(e){}
+    }
+    throw new Error("Could not locate derived data folder");
+  }
   async function get(path){
-    const res = await fetch(PATH + path, {cache:"no-store"});
-    if(!res.ok) throw new Error(res.status);
+    if(!BASE) BASE = await resolveBase();
+    const res = await fetch(BASE+path, {cache:"no-store"});
+    if(!res.ok) throw new Error(`Fetch failed ${BASE+path} (${res.status})`);
     return res;
   }
 
+  // ========= state =========
   const state = {
     scores:[], roi:[], predict:null, snap:[],
-    filters: {gpu:"All", region:"All", type:"On-Demand", duration:"All", count:"All"}
+    filters:{gpu:"All", region:"All", type:"On-Demand", duration:"All", count:"All"}
   };
 
-  function numify(x){ if(x==null) return NaN; return Number(String(x).replace(/[^\d.\-]/g,"")); }
-
-  // ---------- load derived files ----------
+  // ========= load all core data =========
   async function loadAll(){
     const debug=[];
 
-    // Scores
+    // Scores (leaderboard)
     try{
       const txt = await (await get(files.scores)).text();
       const rows = parseCSV(txt).map(r=>({
@@ -203,9 +214,9 @@
         score: r.priceiq_score ? Number(r.priceiq_score) : null,
         ts: r.timestamp
       })).filter(r=>isFinite(r.price));
-      state.scores = rows;
-      debug.push(`✅ Loaded ${files.scores} (${rows.length} rows)`);
-    }catch(e){ debug.push(`⚠️ Failed ${files.scores}`); }
+      state.scores=rows;
+      debug.push(`✅ ${files.scores}: ${rows.length} rows`);
+    }catch(e){ debug.push(`❌ ${files.scores} failed`); }
 
     // ROI
     try{
@@ -213,22 +224,20 @@
       const rows = parseCSV(txt).map(r=>({
         gpu:r.gpu_model, count:Number(r.gpu_count), duration:r.duration,
         provider:r.best_provider, region:r.best_region,
-        p: Number(r.price_per_gpu_hr), total:Number(r.total_cost_usd), ts:r.timestamp
+        p:Number(r.price_per_gpu_hr), total:Number(r.total_cost_usd), ts:r.timestamp
       }));
-      state.roi = rows; debug.push(`✅ Loaded ${files.roi} (${rows.length} rows)`);
-    }catch(e){ debug.push(`⚠️ Failed ${files.roi}`); }
+      state.roi = rows; debug.push(`✅ ${files.roi}: ${rows.length} rows`);
+    }catch(e){ debug.push(`❌ ${files.roi} failed`); }
 
     // Optional predict snapshot
-    try{
-      state.predict = await (await get(files.predict)).json();
-      debug.push(`✅ Loaded ${files.predict}`);
-    }catch(e){ debug.push(`ℹ️ ${files.predict} not found (ok)`); }
+    try{ state.predict = await (await get(files.predict)).json(); debug.push(`✅ ${files.predict}`); }
+    catch(e){ debug.push(`ℹ️ ${files.predict} not found (ok)`); }
 
-    // Snapshot
+    // Snapshot table
     try{
       const txt = await (await get(files.snap)).text();
-      state.snap = parseCSV(txt); debug.push(`✅ Loaded ${files.snap} (${state.snap.length} rows)`);
-    }catch(e){ debug.push(`⚠️ Failed ${files.snap}`); }
+      state.snap = parseCSV(txt); debug.push(`✅ ${files.snap}: ${state.snap.length} rows`);
+    }catch(e){ debug.push(`❌ ${files.snap} failed`); }
 
     document.getElementById("debugLines").innerHTML = debug.map(s=>`<div>${s}</div>`).join("");
 
@@ -236,36 +245,37 @@
     hydrateAll();
   }
 
-  // ---------- filters ----------
+  // ========= filters =========
   function setOptions(el, arr, withAll=true){
-    el.innerHTML=""; const vals = withAll? ["All",...arr]: arr;
+    el.innerHTML="";
+    const vals = withAll? ["All",...arr]: arr;
     for(const v of vals){ const o=document.createElement("option"); o.value=v; o.textContent=v; el.appendChild(o); }
   }
 
   function initFilters(){
-    const gpuSel     = document.getElementById("f_gpu");
-    const typeSel    = document.getElementById("f_type");
-    const regionSel  = document.getElementById("f_region");
-    const durSel     = document.getElementById("f_duration");
-    const countSel   = document.getElementById("f_count");
+    const gpuSel=document.getElementById("f_gpu");
+    const typeSel=document.getElementById("f_type");
+    const regionSel=document.getElementById("f_region");
+    const durSel=document.getElementById("f_duration");
+    const countSel=document.getElementById("f_count");
 
-    const gpus = uniq(state.scores.map(r=>r.gpu)).sort();
-    const types= uniq(state.scores.map(r=>r.type)).sort();
-    const regs = uniq(state.scores.map(r=>r.region)).sort();
-    const durs = uniq(state.scores.map(r=>r.duration)).sort();
+    const gpus=uniq(state.scores.map(r=>r.gpu)).sort();
+    const types=uniq(state.scores.map(r=>r.type)).sort();
+    const regs=uniq(state.scores.map(r=>r.region)).sort();
+    const durs=uniq(state.scores.map(r=>r.duration)).sort();
 
-    setOptions(gpuSel, gpus);
-    setOptions(typeSel, types);
-    setOptions(regionSel, regs);
-    setOptions(durSel, durs);
+    setOptions(gpuSel,gpus);
+    setOptions(typeSel,types);
+    setOptions(regionSel,regs);
+    setOptions(durSel,durs);
     setOptions(countSel, uniq(state.scores.map(r=>r.count).filter(Boolean)).sort((a,b)=>a-b));
 
-    // sensible defaults
+    // sensible defaults (cleaner top section)
     gpuSel.value = gpus.includes("H100") ? "H100" : (gpus[0] || "All");
     typeSel.value = types.includes("On-Demand") ? "On-Demand" : (types[0] || "All");
     durSel.value = durs.includes("1h") ? "1h" : (durs.includes("1 hour") ? "1 hour" : "All");
     regionSel.value = "All"; countSel.value = "All";
-    state.filters={gpu:gpuSel.value, type:typeSel.value, region:"All", duration:durSel.value, count:"All"};
+    state.filters={gpu:gpuSel.value,type:typeSel.value,region:"All",duration:durSel.value,count:"All"};
 
     [gpuSel,typeSel,regionSel,durSel,countSel].forEach((el,i)=>{
       const keys=["gpu","type","region","duration","count"]; const k=keys[i];
@@ -279,7 +289,7 @@
       hydrateAll(); loadForecast();
     };
 
-    // Updated time → latest timestamp from scores
+    // set "Updated:" from latest timestamp
     const latest = state.scores.map(r=>r.ts).filter(Boolean).sort().pop();
     document.getElementById("asOf").textContent = "Updated: " + (latest ? fmt.date(latest) : new Date().toISOString().replace('T',' ').replace('Z',''));
   }
@@ -295,7 +305,7 @@
     );
   }
 
-  // ---------- UI populate ----------
+  // ========= populate UI =========
   function hydrateAll(){
     const rows = applyFilters(state.scores).sort(byNumAsc("price"));
     document.getElementById("kpi_rows").textContent = rows.length;
@@ -319,9 +329,7 @@
     const tbody=document.querySelector("#tbl_leader tbody");
     tbody.innerHTML = rows.map(r=>`
       <tr>
-        <td>${r.provider}</td>
-        <td>${r.region}</td>
-        <td>${r.gpu}</td>
+        <td>${r.provider}</td><td>${r.region}</td><td>${r.gpu}</td>
         <td><span class="pill">${r.type}</span></td>
         <td>${r.duration||"–"}</td>
         <td>${r.count!=null? r.count : "–"}</td>
@@ -341,8 +349,8 @@
       </tr>`).join("");
   }
 
-  // ---------- quick calc ----------
-  function toHours(s){
+  // ========= quick calc =========
+  function toHoursHuman(s){
     if(!s) return NaN; s=String(s).toLowerCase().trim();
     const m=s.match(/^(\d+(?:\.\d+)?)\s*([a-z]+)$/); if(!m) return NaN;
     const q=parseFloat(m[1]), u=m[2];
@@ -354,7 +362,7 @@
     const reg  = document.getElementById("qc_region").value;
     const cnt  = Number(document.getElementById("qc_count").value);
     const durS = document.getElementById("qc_dur").value;
-    const hours= toHours(durS) || 0;
+    const hours= toHoursHuman(durS) || 0;
     const usePred = document.getElementById("qc_usePred").checked;
 
     let rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && /On-Demand/i.test(r.type));
@@ -380,7 +388,7 @@
   }
   document.getElementById("btnCalc").addEventListener("click", runQuickCalc);
 
-  // ---------- forecast chart ----------
+  // ========= forecast chart =========
   async function loadForecast(){
     let txt;
     try{ txt = await (await get(files.forecast)).text(); }
@@ -392,7 +400,7 @@
       gpu:r.gpu_model, type:r.type, duration:r.duration, region:r.region
     }));
 
-    // choose series: cheapest provider in current view (so chart always relevant)
+    // choose series: cheapest provider in current view
     const current = applyFilters(state.scores).sort(byNumAsc("price"))[0];
     let series = [];
     if(current){
@@ -401,18 +409,18 @@
         r.provider_key===key &&
         (state.filters.gpu==="All"|| r.gpu===state.filters.gpu) &&
         (state.filters.type==="All"|| r.type===state.filters.type) &&
-        (state.filters.duration==="All"|| r.duration===state.filters.duration)
+        (state.filters.duration==="All"|| r.duration===state.filters.duration || (r.duration==="1 hour" && state.filters.duration==="1h"))
       );
     }
-    // fallback: any provider matching GPU/type/duration
+    // fallback: any series matching GPU/type/duration
     if(!series.length){
       series = rows.filter(r =>
         (state.filters.gpu==="All"|| r.gpu===state.filters.gpu) &&
         (state.filters.type==="All"|| r.type===state.filters.type) &&
-        (state.filters.duration==="All"|| r.duration===state.filters.duration)
+        (state.filters.duration==="All"|| r.duration===state.filters.duration || (r.duration==="1 hour" && state.filters.duration==="1h"))
       );
     }
-    // final fallback: common default
+    // final fallback: H100 / On-Demand / 1h-ish
     if(!series.length){
       series = rows.filter(r => r.gpu==="H100" && r.type==="On-Demand" && (r.duration==="1h" || r.duration==="1 hour"));
     }
@@ -443,8 +451,15 @@
     });
   }
 
-  // ---------- boot ----------
-  loadAll().then(loadForecast);
+  // ========= boot =========
+  loadAll()
+    .then(loadForecast)
+    .catch(err=>{
+      console.error(err);
+      const dbg=document.getElementById("debugLines");
+      if(dbg) dbg.innerHTML = `<div>❌ ${String(err)}</div>`;
+      const panel=document.getElementById("debugPanel"); if(panel) panel.classList.add("on");
+    });
 
   // debug panel toggle
   document.getElementById("toggleDebug").addEventListener("change", (e)=>{

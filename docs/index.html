@@ -1,4 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Price-IQ</title>
+<link rel="icon" href="data:,">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --muted:#202532; --text:#e7edf3; --sub:#9fb0c3;
+    --accent:#7bd7ff; --ok:#27d980; --warn:#ffd166; --danger:#ff6b6b;
+    --chip:#222838; --chipStroke:#2b3143; --chipText:#cfd9e5;
+    --row:#12161c; --rowAlt:#141922; --badge:#283042;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif}
+  a{color:var(--accent);text-decoration:none}
+  .wrap{max-width:1120px;margin:28px auto;padding:0 18px}
+  header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  header h1{font-size:26px;margin:0}
+  .updated{margin-left:auto;font-size:12px;color:var(--sub);background:var(--panel);border:1px solid var(--chipStroke);padding:6px 10px;border-radius:10px}
+  .row{display:grid;gap:12px}
+  .hero{grid-template-columns:1fr 1fr 1fr 1fr 1fr 110px}
+  .tileRow{grid-template-columns:1fr 1fr 1fr 1fr}
+  @media (max-width:980px){ .hero{grid-template-columns:1fr 1fr} .tileRow{grid-template-columns:1fr 1fr}}
+  .card{background:var(--panel);border:1px solid var(--muted);border-radius:14px;padding:12px}
+  .select, .btn, .inp{width:100%;appearance:none;background:var(--chip);border:1px solid var(--chipStroke);color:var(--text);padding:10px 12px;border-radius:10px}
+  .select{padding-right:36px;background-image:linear-gradient(45deg,transparent 50%,var(--sub) 50%),linear-gradient(135deg,var(--sub) 50%,transparent 50%),linear-gradient(to right,transparent,transparent);
+          background-position:calc(100% - 18px) 16px,calc(100% - 12px) 16px,100% 0;background-size:6px 6px,6px 6px,2.5em 2.5em;background-repeat:no-repeat}
+  .btn{cursor:pointer}
+  .btn.clear{background:#1d2430;border-color:#2a3244}
+  .stat{display:flex;flex-direction:column;gap:6px}
+  .stat h4{margin:0;color:var(--sub);font-weight:600}
+  .stat .val{font-size:28px;font-weight:700}
+  .stat .sub{color:var(--sub);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--badge);color:var(--sub);font-size:12px;border:1px solid var(--chipStroke)}
+  .badge.best{background:rgba(39,217,128,0.12); color:#9ff3c8; border-color:rgba(39,217,128,0.25)}
+  table{width:100%;border-collapse:separate;border-spacing:0 8px}
+  thead th{color:var(--sub);font-weight:600;text-align:left;font-size:12px;padding:0 10px 6px}
+  tbody tr{background:var(--row);border:1px solid var(--muted)}
+  tbody tr:nth-child(even){background:var(--rowAlt)}
+  td{padding:12px 10px;vertical-align:middle}
+  td .pill{display:inline-flex;align-items:center;gap:6px;background:var(--chip);border:1px solid var(--chipStroke);padding:2px 8px;border-radius:999px;font-size:12px;color:var(--chipText)}
+  .right{justify-self:end;text-align:right}
+  .sectionTitle{display:flex;align-items:center;gap:10px;margin:18px 4px 8px}
+  .small{font-size:12px;color:var(--sub)}
+  .debug{display:none}
+  .debug.on{display:block}
+  .controls{display:flex;gap:8px;align-items:center}
+  .switch{display:inline-flex;align-items:center;gap:8px}
+  .switch input{width:18px;height:18px}
+  .control{display:flex;flex-direction:column;gap:6px}
+  .control label{font-size:11px;color:var(--sub);padding-left:2px}
+  .barWrap{margin-top:6px;height:6px;background:rgba(255,255,255,0.05);border:1px solid var(--chipStroke);border-radius:999px;overflow:hidden}
+  .bar{height:100%;background:linear-gradient(90deg, var(--accent), #89e1ff)}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Price-IQ</h1>
+      <span class="small">Auto-generated from <code>data/derived/</code></span>
+      <div class="updated" id="asOf">Updated: —</div>
+    </header>
+
+    <!-- HERO FILTERS -->
+    <div class="row hero">
+      <div class="control"><label>GPU</label><select id="f_gpu" class="select"></select></div>
+      <div class="control"><label>Region</label><select id="f_region" class="select"></select></div>
+      <div class="control"><label>Type</label><select id="f_type" class="select"></select></div>
+      <div class="control"><label>Duration</label><select id="f_duration" class="select"></select></div>
+      <div class="control"><label>GPU Count</label><select id="f_count" class="select"></select></div>
+      <div class="control"><label>&nbsp;</label><button class="btn clear" id="btnClear">Clear</button></div>
+    </div>
+
+    <!-- KPI TILES -->
+    <div class="row tileRow" style="margin-top:12px">
+      <div class="card stat">
+        <h4>Cheapest / GPU-hr</h4>
+        <div class="val" id="kpi_low">–</div>
+        <div class="sub" id="kpi_low_sub"> </div>
+      </div>
+      <div class="card stat">
+        <h4>Median / GPU-hr</h4>
+        <div class="val" id="kpi_med">–</div>
+        <div class="sub" id="kpi_med_sub"> </div>
+      </div>
+      <div class="card stat">
+        <h4>Providers covered</h4>
+        <div class="val" id="kpi_prov">–</div>
+        <div class="sub" id="kpi_prov_sub">Unique provider names in current filter.</div>
+      </div>
+      <div class="card stat">
+        <h4>Entries</h4>
+        <div class="val" id="kpi_rows">0</div>
+        <div class="sub">Rows displayed in leaderboard.</div>
+      </div>
+    </div>
+
+    <!-- DATA STATUS -->
+    <div class="sectionTitle" style="margin-top:18px">
+      <div class="switch small"><input type="checkbox" id="toggleDebug"><label for="toggleDebug">Show data status (debug)</label></div>
+    </div>
+    <div class="card debug" id="debugPanel"><div id="debugLines" class="small"></div></div>
+
+    <!-- LEADERBOARD -->
+    <div class="sectionTitle">
+      <h3 style="margin:0">Leaderboard (Price-IQ)</h3>
+      <span class="small" id="lbSort">Sorted by price ↑</span>
+    </div>
+    <div class="card">
+      <table id="tbl_leader">
+        <thead>
+          <tr>
+            <th>Provider</th><th>Region</th><th>GPU</th><th>Type</th>
+            <th>Duration</th><th>Count</th>
+            <th class="right">$/GPU-hr</th><th class="right">Score</th><th class="right">Timestamp</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- ROI (IMPROVED) -->
+    <div class="sectionTitle">
+      <h3 style="margin:0">ROI (Cheapest total cost)</h3>
+      <span class="small">from <code>roi_comparison.csv</code> · <span id="roiMeta"></span></span>
+    </div>
+    <div class="card">
+      <table id="tbl_roi">
+        <thead>
+          <tr>
+            <th>GPU</th><th>Count</th><th>Duration</th><th>Provider</th>
+            <th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- QUICK CALC -->
+    <div class="sectionTitle"><h3 style="margin:0">ROI Calculator (quick)</h3></div>
+    <div class="card">
+      <div class="controls" style="flex-wrap:wrap;margin-bottom:10px">
+        <select id="qc_gpu"   class="select" style="min-width:160px"></select>
+        <select id="qc_region"class="select" style="min-width:160px"></select>
+        <select id="qc_count" class="select" style="min-width:120px"></select>
+        <select id="qc_dur"   class="select" style="min-width:160px"></select>
+        <label class="switch small"><input type="checkbox" id="qc_usePred"> Use predictions (P50) if available</label>
+        <button class="btn" id="btnCalc">Calculate</button>
+      </div>
+      <table id="tbl_qc">
+        <thead><tr><th>Provider</th><th>Region</th><th class="right">$/GPU-hr</th><th class="right">Total cost</th><th class="right">Source</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="row tileRow" style="margin-top:12px">
+        <div class="card stat"><h4>Predicted price (P10)</h4><div class="val" id="p10">–</div></div>
+        <div class="card stat"><h4>Predicted price (P25)</h4><div class="val" id="p25">–</div></div>
+        <div class="card stat"><h4>Predicted price (P50)</h4><div class="val" id="p50">–</div></div>
+        <div class="card stat"><h4>Predicted price (P75 / P90)</h4><div class="val" id="p7590">– / –</div></div>
+      </div>
+    </div>
+
+    <!-- PRICE BENCHMARK (CROSS-PROVIDER) -->
+    <div class="sectionTitle">
+      <h3 style="margin:0">Price benchmark (cross-provider)</h3>
+      <span class="small">from <code>data/derived/provider_scores_latest.csv</code></span>
+    </div>
+    <div class="card" id="benchCard">
+      <div class="row" style="grid-template-columns:320px 1fr; gap:18px">
+        <!-- Controls -->
+        <div>
+          <div class="control" style="margin-bottom:10px"><label>GPU</label>
+            <select id="bm_gpu" class="select"><option>H100</option><option>H200</option></select>
+          </div>
+          <div class="control" style="margin-bottom:10px"><label>Region</label>
+            <select id="bm_region" class="select"></select>
+          </div>
+          <div class="control" style="margin-bottom:10px"><label>Type</label>
+            <select id="bm_type" class="select"></select>
+          </div>
+          <div class="control" style="margin-bottom:10px"><label>Duration</label>
+            <select id="bm_duration" class="select"></select>
+          </div>
+          <div class="control" style="margin-bottom:10px"><label>GPU Count</label>
+            <select id="bm_count" class="select"></select>
+          </div>
+          <button class="btn" id="bm_run">Predict price</button>
+          <div class="small" id="bm_note" style="margin-top:8px;color:var(--sub)"></div>
+          <div class="small" style="margin-top:8px;color:var(--sub)">Deal guidance: <span id="bm_deal" class="badge" style="display:none"></span></div>
+        </div>
+
+        <!-- Results -->
+        <div>
+          <div class="row tileRow">
+            <div class="card stat"><h4>10% quantile</h4><div class="val" id="bm_p10">–</div></div>
+            <div class="card stat"><h4>25% quantile</h4><div class="val" id="bm_p25">–</div></div>
+            <div class="card stat"><h4>Median</h4><div class="val" id="bm_p50">–</div></div>
+            <div class="card stat"><h4>75% quantile</h4><div class="val" id="bm_p75">–</div></div>
+            <div class="card stat"><h4>90% quantile</h4><div class="val" id="bm_p90">–</div></div>
+          </div>
+
+          <div class="card" style="margin-top:12px;text-align:center">
+            <div class="small" style="margin-bottom:6px;color:var(--sub)">Predicted price (P50)</div>
+            <div style="font-size:40px;font-weight:800" id="bm_big">–</div>
+          </div>
+
+          <div class="card" style="margin-top:12px">
+            <canvas id="bm_chart" height="120"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FORECAST (72h) -->
+    <div class="sectionTitle">
+      <h3 style="margin:0">Forecast (next 72 hours)</h3>
+      <span class="small">from <code>forecast.csv</code> · <span id="fcMeta"></span></span>
+    </div>
+    <div class="card">
+      <div class="small" id="fcNote" style="margin-bottom:8px;color:var(--sub)"></div>
+      <canvas id="fc_chart" height="120"></canvas>
+    </div>
+
+    <!-- SNAPSHOT -->
+    <div class="sectionTitle">
+      <h3 style="margin:0">Compute Calculator Snapshot</h3>
+      <span class="small">from <code>compute_calculator_snapshot.csv</code></span>
+    </div>
+    <div class="card">
+      <table id="tbl_comp">
+        <thead>
+          <tr>
+            <th>GPU</th><th>Provider type</th><th>$ / GPU-hr</th><th>TOTAL (term)</th>
+            <th class="right">lo</th><th class="right">md</th><th class="right">hi</th>
+            <th class="right">term hrs</th><th class="right">GPUs</th><th>Region</th><th class="right">#quotes</th><th>Source</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <p class="small" style="margin:16px 4px 40px">
+      Tip: serve over HTTP (e.g. <code>python -m http.server</code>). Data loads from <code>data/derived/</code>.
+      Toggle debug to see which files were found.
+    </p>
+  </div>
+
 <script>
+window.addEventListener('DOMContentLoaded', () => {
 (function(){
   // ---------------------- DEBUG LOGGER ----------------------
   const dbg = [];
@@ -6,11 +256,13 @@
     dbg.push(msg);
     const el = document.getElementById("debugLines");
     if (el) el.innerHTML = dbg.map(s=>`<div>${s}</div>`).join("");
+    console.log("[Price-IQ]", msg);
   }
   const dbgToggle = document.getElementById("toggleDebug");
-  if (dbgToggle) {
+  const debugPanel = document.getElementById("debugPanel");
+  if (dbgToggle && debugPanel) {
     dbgToggle.addEventListener("change",(e)=>{
-      document.getElementById("debugPanel").classList.toggle("on", e.target.checked);
+      debugPanel.classList.toggle("on", e.target.checked);
     });
   }
 
@@ -37,7 +289,9 @@
 
   // ---------------------- ROBUST PATHS ----------------------
   async function tryFetch(url){
-    const r = await fetch(url,{cache:"no-store"});
+    // simple cache-buster helps on GitHub Pages
+    const bust = (url.includes('?') ? '&' : '?') + 'v=' + Date.now();
+    const r = await fetch(url + bust,{cache:"no-store"});
     if(!r.ok) throw new Error(r.status+" "+url);
     return r;
   }
@@ -49,7 +303,9 @@
     for(const b of DER_BASES){
       try{ const r=await tryFetch(b+file); logDbg("✅ "+b+file); return r; }catch(e){}
     }
-    logDbg("❌ MISSING: "+file); throw new Error("Missing "+file);
+    const msg = "❌ MISSING: "+file;
+    logDbg(msg);
+    throw new Error("Missing "+file);
   }
 
   // ---------------------- STATE ----------------------
@@ -90,8 +346,10 @@
       logDbg(`rows(roi): ${state.roi.length}`);
     }catch(e){ logDbg("roi load error: "+e); }
 
-    try{ state.predict = await (await getDerived(files.predict)).json(); logDbg("predict: ok"); }
-    catch(e){ logDbg("predict not found (ok)"); }
+    try{
+      state.predict = await (await getDerived(files.predict)).json();
+      logDbg("predict: ok");
+    } catch(e){ logDbg("predict not found (ok)"); }
 
     try{
       const txt = await (await getDerived(files.snap)).text();
@@ -118,6 +376,7 @@
 
   // ---------------------- FILTERS + KPI ----------------------
   function setOptions(el, arr, withAll=true){
+    if (!el) return;
     const vals = withAll ? ["All", ...arr] : arr;
     el.innerHTML = vals.map(v=>`<option>${v}</option>`).join("");
   }
@@ -141,31 +400,27 @@
     setOptions(durSel,durs);
     setOptions(cntSel,cnts);
 
-    gpuSel.value = gpus.includes("H100") ? "H100" : (gpus[0]||"All");
-    typSel.value = types.includes("On-Demand") ? "On-Demand" : "All";
-    regSel.value="All"; durSel.value="All"; cntSel.value="All";
-    state.filters={gpu:gpuSel.value, region:"All", type:typSel.value, duration:"All", count:"All"};
+    if (gpuSel) gpuSel.value = gpus.includes("H100") ? "H100" : (gpus[0]||"All");
+    if (typSel) typSel.value = types.includes("On-Demand") ? "On-Demand" : "All";
+    if (regSel) regSel.value="All";
+    if (durSel) durSel.value="All";
+    if (cntSel) cntSel.value="All";
+
+    state.filters={gpu:gpuSel?.value||"All", region:"All", type:typSel?.value||"All", duration:"All", count:"All"};
 
     [gpuSel,regSel,typSel,durSel,cntSel].forEach((el,i)=>{
+      if (!el) return;
       const keys=["gpu","region","type","duration","count"]; const k=keys[i];
       el.addEventListener("change", ()=>{ state.filters[k]=el.value; hydrateAll(); });
     });
 
-    document.getElementById("btnClear").onclick=()=>{
-      gpuSel.value = gpus.includes("H100") ? "H100" : (gpus[0]||"All");
-      typSel.value = types.includes("On-Demand") ? "On-Demand" : "All";
-      regSel.value="All"; durSel.value="All"; cntSel.value="All";
-      state.filters={gpu:gpuSel.value, region:"All", type:typSel.value, duration:"All", count:"All"};
-      hydrateAll();
-    };
-
-    // "Updated" time from latest of any source (scores favored)
     const times = [
       ...state.scores.map(r=>r.ts).filter(Boolean),
       ...state.roi.map(r=>r.ts).filter(Boolean)
     ].sort();
     const latest = times.pop();
-    document.getElementById("asOf").textContent = "Updated: " + (latest ? fmt.date(latest) : new Date().toISOString().replace('T',' ').replace('Z',''));
+    const asOfEl = document.getElementById("asOf");
+    if (asOfEl) asOfEl.textContent = "Updated: " + (latest ? fmt.date(latest) : new Date().toISOString().replace('T',' ').replace('Z',''));
   }
 
   function applyFilters(rows){
@@ -181,85 +436,94 @@
 
   function hydrateAll(){
     const rows=applyFilters(state.scores).sort(byNumAsc("price"));
-    document.getElementById("kpi_rows").textContent = rows.length;
+    const kpiRows = document.getElementById("kpi_rows"); if (kpiRows) kpiRows.textContent = rows.length;
 
     if(rows.length){
       const lo=rows[0];
-      document.getElementById("kpi_low").textContent=fmt.money(lo.price);
-      document.getElementById("kpi_low_sub").textContent=`${lo.provider} · ${lo.region} · ${lo.gpu} (${lo.type})`;
+      const set = (id,txt)=>{ const el=document.getElementById(id); if(el) el.textContent=txt; };
+      set("kpi_low", fmt.money(lo.price));
+      set("kpi_low_sub", `${lo.provider} · ${lo.region} · ${lo.gpu} (${lo.type})`);
       const prices=rows.map(r=>r.price).filter(isFinite).sort((a,b)=>a-b);
       const mid=prices[Math.floor(prices.length/2)];
-      document.getElementById("kpi_med").textContent=fmt.money(mid);
-      document.getElementById("kpi_med_sub").textContent=`${rows.length} quotes`;
-      document.getElementById("kpi_prov").textContent=uniq(rows.map(r=>r.provider)).length;
+      set("kpi_med", fmt.money(mid));
+      set("kpi_med_sub", `${rows.length} quotes`);
+      set("kpi_prov", uniq(rows.map(r=>r.provider)).length);
     }else{
-      ["kpi_low","kpi_med","kpi_prov"].forEach(id=>document.getElementById(id).textContent="–");
-      document.getElementById("kpi_low_sub").textContent="";
-      document.getElementById("kpi_med_sub").textContent="";
+      ["kpi_low","kpi_med","kpi_prov"].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent="–"; });
+      ["kpi_low_sub","kpi_med_sub"].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=""; });
     }
 
     // Leaderboard
-    document.querySelector("#tbl_leader tbody").innerHTML = rows.map(r=>`
-      <tr>
-        <td>${r.provider}</td><td>${r.region}</td><td>${r.gpu}</td>
-        <td><span class="pill">${r.type}</span></td>
-        <td>${r.duration||"–"}</td>
-        <td>${r.count!=null? r.count : "–"}</td>
-        <td class="right">${fmt.money(r.price)}</td>
-        <td class="right">${r.score!=null? Number(r.score).toFixed(1):"–"}</td>
-        <td class="right">${fmt.date(r.ts)}</td>
-      </tr>`).join("");
+    const lbBody = document.querySelector("#tbl_leader tbody");
+    if (lbBody){
+      lbBody.innerHTML = rows.map(r=>`
+        <tr>
+          <td>${r.provider}</td><td>${r.region}</td><td>${r.gpu}</td>
+          <td><span class="pill">${r.type}</span></td>
+          <td>${r.duration||"–"}</td>
+          <td>${r.count!=null? r.count : "–"}</td>
+          <td class="right">${fmt.money(r.price)}</td>
+          <td class="right">${r.score!=null? Number(r.score).toFixed(1):"–"}</td>
+          <td class="right">${fmt.date(r.ts)}</td>
+        </tr>`).join("");
+    }
 
     // ROI (cleaner)
-    const roi = [...state.roi].filter(r=>isFinite(r.total));
-    roi.sort((a,b)=> a.total - b.total);
+    const roi = [...state.roi].filter(r=>isFinite(r.total)).sort((a,b)=> a.total - b.total);
     const minT = roi.length ? roi[0].total : 0;
     const maxT = roi.length ? roi[roi.length-1].total : 1;
     const span  = Math.max(1, maxT - minT);
-    document.getElementById("roiMeta").textContent = roi.length ? `sorted by total cost ↑ · ${roi.length} rows` : "no rows";
-    document.querySelector("#tbl_roi tbody").innerHTML = roi.map((r,i)=>{
-      const w = Math.max(6, Math.round(((r.total - minT)/span) * 100));
-      const best = i===0 ? `<span class="badge best">best</span>` : "";
-      return `<tr title="relative vs cheapest: ${w}%">
-        <td>${r.gpu}</td><td>${r.count}</td><td>${r.duration}</td>
-        <td>${r.provider} ${best}</td><td>${r.region}</td>
-        <td class="right">${fmt.money(r.p)}</td>
-        <td class="right">
-          ${fmt.money0(r.total)}
-          <div class="barWrap"><div class="bar" style="width:${w}%"></div></div>
-        </td>
-      </tr>`;
-    }).join("");
+    const roiMeta = document.getElementById("roiMeta");
+    if (roiMeta) roiMeta.textContent = roi.length ? `sorted by total cost ↑ · ${roi.length} rows` : "no rows";
+    const roiBody = document.querySelector("#tbl_roi tbody");
+    if (roiBody){
+      roiBody.innerHTML = roi.map((r,i)=>{
+        const w = Math.max(6, Math.round(((r.total - minT)/span) * 100));
+        const best = i===0 ? `<span class="badge best">best</span>` : "";
+        return `<tr title="relative vs cheapest: ${w}%">
+          <td>${r.gpu}</td><td>${r.count}</td><td>${r.duration}</td>
+          <td>${r.provider} ${best}</td><td>${r.region}</td>
+          <td class="right">${fmt.money(r.p)}</td>
+          <td class="right">
+            ${fmt.money0(r.total)}
+            <div class="barWrap"><div class="bar" style="width:${w}%"></div></div>
+          </td>
+        </tr>`;
+      }).join("");
+    }
 
-    // Snapshot table
+    // Snapshot
     const cbody=document.querySelector("#tbl_comp tbody");
-    cbody.innerHTML = state.snap.map(r=>{
-      const lo = r.price_lo ?? r.price_lo_usd ?? r.lo;
-      const md = r.price_md ?? r.price_md_usd ?? r.md;
-      const hi = r.price_hi ?? r.price_hi_usd ?? r.hi;
-      return `<tr>
-        <td>${r.gpu_model || r.gpu || ""}</td>
-        <td>${r.provider_type || r.provider_type_label || ""}</td>
-        <td>${r["$/GPU-hr"] || (lo && hi ? `$${lo}–$${hi}`:"")}</td>
-        <td>${r.TOTAL || r.total || ""}</td>
-        <td class="right">${lo??""}</td>
-        <td class="right">${md??""}</td>
-        <td class="right">${hi??""}</td>
-        <td class="right">${r.term_hours || r.term_hrs || ""}</td>
-        <td class="right">${r.gpu_count || r.gpus || ""}</td>
-        <td>${r.used_region || r.region || ""}</td>
-        <td class="right">${r.n_quotes || r.quotes || ""}</td>
-        <td>${r.source || ""}</td>
-      </tr>`;
-    }).join("");
+    if (cbody){
+      cbody.innerHTML = state.snap.map(r=>{
+        const lo = r.price_lo ?? r.price_lo_usd ?? r.lo;
+        const md = r.price_md ?? r.price_md_usd ?? r.md;
+        const hi = r.price_hi ?? r.price_hi_usd ?? r.hi;
+        return `<tr>
+          <td>${r.gpu_model || r.gpu || ""}</td>
+          <td>${r.provider_type || r.provider_type_label || ""}</td>
+          <td>${r["$/GPU-hr"] || (lo && hi ? `$${lo}–$${hi}`:"")}</td>
+          <td>${r.TOTAL || r.total || ""}</td>
+          <td class="right">${lo??""}</td>
+          <td class="right">${md??""}</td>
+          <td class="right">${hi??""}</td>
+          <td class="right">${r.term_hours || r.term_hrs || ""}</td>
+          <td class="right">${r.gpu_count || r.gpus || ""}</td>
+          <td>${r.used_region || r.region || ""}</td>
+          <td class="right">${r.n_quotes || r.quotes || ""}</td>
+          <td>${r.source || ""}</td>
+        </tr>`;
+      }).join("");
+    }
 
     // Pred tiles from snapshot
     const pp = state.predict||{};
     const moneyOrDash = v => (v==null||isNaN(v)) ? "–" : `$${Number(v).toFixed(2)}`;
-    document.getElementById("p10").textContent  = moneyOrDash(pp.p10);
-    document.getElementById("p25").textContent  = moneyOrDash(pp.p25);
-    document.getElementById("p50").textContent  = moneyOrDash(pp.p50);
-    document.getElementById("p7590").textContent= `${moneyOrDash(pp.p75||pp.p50)} / ${moneyOrDash(pp.p90)}`;
+    const set = (id,txt)=>{ const el=document.getElementById(id); if(el) el.textContent=txt; };
+    set("p10",  moneyOrDash(pp.p10));
+    set("p25",  moneyOrDash(pp.p25));
+    set("p50",  moneyOrDash(pp.p50));
+    set("p7590",`${moneyOrDash(pp.p75||pp.p50)} / ${moneyOrDash(pp.p90)}`);
   }
 
   // ---------------------- QUICK CALC ----------------------
@@ -267,24 +531,25 @@
     const gpus = uniq(state.scores.map(r=>r.gpu)).sort();
     const regs = uniq(state.scores.map(r=>r.region)).sort();
 
-    function set(el, arr){ el.innerHTML = arr.map(v=>`<option>${v}</option>`).join(""); }
+    function setOpts(el, arr){ if(el) el.innerHTML = arr.map(v=>`<option>${v}</option>`).join(""); }
     const qc_gpu   = document.getElementById("qc_gpu");
     const qc_region= document.getElementById("qc_region");
     const qc_count = document.getElementById("qc_count");
     const qc_dur   = document.getElementById("qc_dur");
 
-    set(qc_gpu, gpus);
-    set(qc_region, regs);
-    set(qc_count, [8,16,32,64]);
-    set(qc_dur, ["1 hour","1 day","1 week","1 month"]);
+    setOpts(qc_gpu, gpus);
+    setOpts(qc_region, regs);
+    setOpts(qc_count, [8,16,32,64]);
+    setOpts(qc_dur, ["1 hour","1 day","1 week","1 month"]);
 
-    qc_gpu.value   = gpus.includes("H100") ? "H100" : (gpus[0]||"");
-    qc_region.value= regs.includes("Global") ? "Global" : (regs[0]||"");
-    qc_count.value = "8";
-    qc_dur.value   = "1 hour";
+    if (qc_gpu)    qc_gpu.value   = gpus.includes("H100") ? "H100" : (gpus[0]||"");
+    if (qc_region) qc_region.value= regs.includes("Global") ? "Global" : (regs[0]||"");
+    if (qc_count)  qc_count.value = "8";
+    if (qc_dur)    qc_dur.value   = "1 hour";
 
-    document.getElementById("btnCalc").onclick = runQuickCalc;
-    runQuickCalc(); // render once on load
+    const btn = document.getElementById("btnCalc");
+    if (btn) btn.onclick = runQuickCalc;
+    runQuickCalc();
   }
 
   function durToHours(s){
@@ -296,19 +561,29 @@
   }
 
   function runQuickCalc(){
-    const gpu  = document.getElementById("qc_gpu").value;
-    let   reg  = document.getElementById("qc_region").value;
-    const cnt  = Number(document.getElementById("qc_count").value||0);
-    const hrs  = durToHours(document.getElementById("qc_dur").value);
-    const usePred = document.getElementById("qc_usePred").checked;
+    const qc_gpu   = document.getElementById("qc_gpu");
+    const qc_region= document.getElementById("qc_region");
+    const qc_count = document.getElementById("qc_count");
+    const qc_dur   = document.getElementById("qc_dur");
+    if (!qc_gpu || !qc_region || !qc_count || !qc_dur) return;
+
+    const gpu  = qc_gpu.value;
+    let   reg  = qc_region.value;
+    const cnt  = Number(qc_count.value||0);
+    const hrs  = durToHours(qc_dur.value);
+    const usePred = !!document.getElementById("qc_usePred")?.checked;
 
     // Primary: exact region
     let rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && /On-Demand/i.test(r.type));
-    // Fallback to any region for visibility
+    // Fallback to any region
     if (!rows.length){
       const any = state.scores.find(r=> r.gpu===gpu && /On-Demand/i.test(r.type));
-      if (any){ reg = any.region; rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && /On-Demand/i.test(r.type));
-               document.getElementById("qc_region").value = reg; logDbg(`QC: no rows for chosen region, using ${reg}`); }
+      if (any){
+        reg = any.region;
+        rows = state.scores.filter(r=> r.gpu===gpu && r.region===reg && /On-Demand/i.test(r.type));
+        if (qc_region) qc_region.value = reg;
+        logDbg(`QC: no rows for chosen region, using ${reg}`);
+      }
     }
 
     const byProv = new Map();
@@ -327,39 +602,46 @@
     }
 
     out.sort((a,b)=>a.total-b.total);
-    document.querySelector("#tbl_qc tbody").innerHTML = out.map(r=>`
-      <tr>
-        <td>${r.provider}</td><td>${r.region}</td>
-        <td class="right">${fmt.money(r.price)}</td>
-        <td class="right">${fmt.money0(r.total)}</td>
-        <td class="right"><span class="badge">${r.src}</span></td>
-      </tr>`).join("");
+    const body = document.querySelector("#tbl_qc tbody");
+    if (body){
+      body.innerHTML = out.map(r=>`
+        <tr>
+          <td>${r.provider}</td><td>${r.region}</td>
+          <td class="right">${fmt.money(r.price)}</td>
+          <td class="right">${fmt.money0(r.total)}</td>
+          <td class="right"><span class="badge">${r.src}</span></td>
+        </tr>`).join("");
+    }
   }
 
-  // ---------------------- PERMALINK HELPERS (Benchmark state) ----------------------
-  function syncURLFromBenchmark(){
-    const params = new URLSearchParams(location.search);
-    params.set('gpu',      document.getElementById('bm_gpu').value);
-    params.set('region',   document.getElementById('bm_region').value);
-    params.set('type',     document.getElementById('bm_type').value);
-    params.set('duration', document.getElementById('bm_duration').value);
-    params.set('count',    document.getElementById('bm_count').value);
-    const qs = params.toString();
-    history.replaceState(null, '', qs ? ('?'+qs) : location.pathname);
+  // ---------------------- PRICE BENCHMARK ----------------------
+  function setOptionsPlain(el, arr){ if(el) el.innerHTML = arr.map(v=>`<option>${v}</option>`).join(""); }
+  function quantiles(sortedVals, ps){
+    const n = sortedVals.length; if (!n) return ps.map(()=>NaN);
+    return ps.map(p => {
+      if (n===1) return sortedVals[0];
+      const idx = (n-1)*p, lo=Math.floor(idx), hi=Math.ceil(idx);
+      if (lo===hi) return sortedVals[lo];
+      const w = idx-lo; return sortedVals[lo]*(1-w) + sortedVals[hi]*w;
+    });
   }
-  function applyURLToBenchmark(){
-    const sp = new URLSearchParams(location.search);
-    return {
-      gpu:      sp.get('gpu')      || null,
-      region:   sp.get('region')   || null,
-      type:     sp.get('type')     || null,
-      duration: sp.get('duration') || null,
-      count:    sp.get('count')    || null
-    };
+  function kde(values, gridN=160){
+    const n=values.length; if(!n) return {x:[], y:[]};
+    const mean = values.reduce((a,b)=>a+b,0)/n;
+    const s2 = values.reduce((a,b)=>a+(b-mean)**2,0)/Math.max(1,n-1);
+    const sd = Math.sqrt(Math.max(s2, 1e-9));
+    const h = 1.06*sd*Math.pow(n,-1/5);
+    const minV = Math.min(...values), maxV = Math.max(...values);
+    const pad = 0.15*(maxV-minV || 1);
+    const lo = minV - pad, hi = maxV + pad;
+    const x = Array.from({length:gridN},(_,i)=> lo + (i/(gridN-1))*(hi-lo));
+    const y = x.map(xi=>{
+      let s=0; for(const v of values){ const u=(xi-v)/h; s += Math.exp(-0.5*u*u); }
+      return s/(n*h*Math.sqrt(2*Math.PI));
+    });
+    const ymax = Math.max(...y, 1e-9);
+    return {x, y: y.map(d=>d/ymax)};
   }
-
-  // ---------------------- PRICE BENCHMARK (w/ Confidence + Deal) ----------------------
-  function setOptionsPlain(el, arr){ el.innerHTML = arr.map(v=>`<option>${v}</option>`).join(""); }
 
   let _bmChart;
   function initBenchmarkUI(){
@@ -376,31 +658,43 @@
     setOptionsPlain(document.getElementById("bm_duration"),durs);
     setOptionsPlain(document.getElementById("bm_count"),   counts);
 
-    // Apply URL params if present, else sensible defaults
-    const u = applyURLToBenchmark();
-    document.getElementById("bm_gpu").value      = (u.gpu && gpus.includes(u.gpu)) ? u.gpu : (gpus.includes("H100")?"H100":(gpus[0]||""));
-    document.getElementById("bm_region").value   = (u.region && regions.includes(u.region)) ? u.region : (regions.includes("Global")?"Global":(regions[0]||""));
-    document.getElementById("bm_type").value     = (u.type && types.includes(u.type)) ? u.type : (types.find(t=>/On-Demand/i.test(t)) || (types[0]||""));
-    document.getElementById("bm_duration").value = (u.duration && durs.includes(u.duration)) ? u.duration : (durs.find(d=>/1h|1 hour/i.test(d)) || (durs[0]||""));
-    document.getElementById("bm_count").value    = (u.count && counts.includes(+u.count)) ? +u.count : (counts.includes(8)?8:(counts[0]||""));
+    const bm_gpu=document.getElementById("bm_gpu");
+    const bm_region=document.getElementById("bm_region");
+    const bm_type=document.getElementById("bm_type");
+    const bm_duration=document.getElementById("bm_duration");
+    const bm_count=document.getElementById("bm_count");
 
-    document.getElementById("bm_run").onclick = ()=>{ runBenchmark(); renderForecast(); syncURLFromBenchmark(); };
+    if (bm_gpu)      bm_gpu.value      = gpus.includes("H100")?"H100":(gpus[0]||"");
+    if (bm_region)   bm_region.value   = regions.includes("Global")?"Global":(regions[0]||"");
+    if (bm_type)     bm_type.value     = types.find(t=>/On-Demand/i.test(t)) || (types[0]||"");
+    if (bm_duration) bm_duration.value = durs.find(d=>/1h|1 hour/i.test(d)) || (durs[0]||"");
+    if (bm_count)    bm_count.value    = counts.includes(8)?8:(counts[0]||"");
+
+    const run = ()=>{ runBenchmark(); renderForecast(); };
+    const bm_run=document.getElementById("bm_run");
+    if (bm_run) bm_run.onclick = run;
     ["bm_gpu","bm_region","bm_type","bm_duration","bm_count"].forEach(id=>{
-      document.getElementById(id).addEventListener("change", ()=>{ runBenchmark(); renderForecast(); syncURLFromBenchmark(); });
+      const el=document.getElementById(id);
+      if (el) el.addEventListener("change", run);
     });
-
     runBenchmark();
-    syncURLFromBenchmark();
   }
 
   function runBenchmark(){
-    const gpu  = document.getElementById("bm_gpu").value;
-    const reg0 = document.getElementById("bm_region").value;
-    const typ0 = document.getElementById("bm_type").value;
-    const dur0 = document.getElementById("bm_duration").value;
-    const cnt0 = document.getElementById("bm_count").value;
+    const bm_gpu=document.getElementById("bm_gpu");
+    const bm_region=document.getElementById("bm_region");
+    const bm_type=document.getElementById("bm_type");
+    const bm_duration=document.getElementById("bm_duration");
+    const bm_count=document.getElementById("bm_count");
+    if (!bm_gpu || !bm_region || !bm_type || !bm_duration || !bm_count) return;
 
-    // Build a sample; relax progressively for coverage
+    const gpu  = bm_gpu.value;
+    const reg0 = bm_region.value;
+    const typ0 = bm_type.value;
+    const dur0 = bm_duration.value;
+    const cnt0 = bm_count.value;
+
+    // exact slice, then relax progressively
     let sample = state.scores.filter(r=> r.gpu===gpu && r.region===reg0 && r.type===typ0 && r.duration===dur0 && String(r.count)===String(cnt0));
     let note = `exact slice (${sample.length})`;
     if (sample.length < 8) { sample = state.scores.filter(r=> r.gpu===gpu && r.region===reg0 && r.type===typ0 && r.duration===dur0); note="relaxed: drop count"; }
@@ -409,28 +703,26 @@
     if (sample.length < 8) { sample = state.scores.filter(r=> r.gpu===gpu); note="relaxed: GPU only"; }
 
     const vals = sample.map(r=>r.price).filter(Number.isFinite).sort((a,b)=>a-b);
-    const money = n => isFinite(n) ? `$${n.toFixed(2)}` : "–";
-
-    // Quantiles
-    const q = (ps)=>{
-      const n=vals.length; if(!n) return ps.map(()=>NaN);
-      return ps.map(p=>{
-        if (n===1) return vals[0];
-        const idx=(n-1)*p, lo=Math.floor(idx), hi=Math.ceil(idx);
-        if (lo===hi) return vals[lo];
-        const w=idx-lo; return vals[lo]*(1-w)+vals[hi]*w;
+    const [p10,p25,p50,p75,p90] = (function(sorted, ps){ // quantiles
+      const n = sorted.length; if (!n) return ps.map(()=>NaN);
+      return ps.map(p => {
+        if (n===1) return sorted[0];
+        const idx = (n-1)*p, lo=Math.floor(idx), hi=Math.ceil(idx);
+        if (lo===hi) return sorted[lo];
+        const w = idx-lo; return sorted[lo]*(1-w) + sorted[hi]*w;
       });
-    };
-    const [p10,p25,p50,p75,p90] = q([0.10,0.25,0.50,0.75,0.90]);
+    })(vals,[0.10,0.25,0.50,0.75,0.90]);
 
-    document.getElementById("bm_p10").textContent = money(p10);
-    document.getElementById("bm_p25").textContent = money(p25);
-    document.getElementById("bm_p50").textContent = money(p50);
-    document.getElementById("bm_p75").textContent = money(p75);
-    document.getElementById("bm_p90").textContent = money(p90);
-    document.getElementById("bm_big").textContent = money(p50);
+    const money = n => isFinite(n) ? `$${n.toFixed(2)}` : "–";
+    const set = (id,txt)=>{ const el=document.getElementById(id); if(el) el.textContent=txt; };
+    set("bm_p10", money(p10));
+    set("bm_p25", money(p25));
+    set("bm_p50", money(p50));
+    set("bm_p75", money(p75));
+    set("bm_p90", money(p90));
+    set("bm_big", money(p50));
 
-    // Confidence badge text (in bm_note)
+    // Confidence + note
     let noteTxt = `Samples: ${vals.length} (${note})`;
     let conf = "Low";
     if (isFinite(p50) && isFinite(p25) && isFinite(p75) && vals.length){
@@ -440,9 +732,9 @@
              (vals.length>=20 && disp<0.40) ? "Medium" : "Low";
       noteTxt += ` · Confidence: ${conf}`;
     }
-    document.getElementById("bm_note").textContent = noteTxt;
+    set("bm_note", noteTxt);
 
-    // Deal guidance vs cheapest observed in the sample
+    // Deal guidance vs cheapest
     const dealEl = document.getElementById("bm_deal");
     if (dealEl){
       dealEl.style.display = "none";
@@ -451,42 +743,26 @@
         const cheapest = vals[0];
         if (cheapest < p25){
           dealEl.textContent = "Deal (book now)";
-          dealEl.classList.add("ok");
+          dealEl.classList.add("best");
           dealEl.style.display = "inline-block";
         } else if (cheapest > p75){
           dealEl.textContent = "Rich (likely cheaper later)";
-          dealEl.classList.add("rich");
+          dealEl.classList.add("warn");
           dealEl.style.display = "inline-block";
         } else {
           dealEl.textContent = "Fair";
-          dealEl.classList.add("warn");
+          dealEl.classList.add("badge");
           dealEl.style.display = "inline-block";
         }
       }
     }
 
     // KDE chart
-    const kde = (values, gridN=160)=>{
-      const n=values.length; if(!n) return {x:[],y:[]};
-      const mean = values.reduce((a,b)=>a+b,0)/n;
-      const s2 = values.reduce((a,b)=>a+(b-mean)**2,0)/Math.max(1,n-1);
-      const sd = Math.sqrt(Math.max(s2, 1e-9));
-      const h = 1.06*sd*Math.pow(n,-1/5);
-      const minV = Math.min(...values), maxV = Math.max(...values);
-      const pad = 0.15*(maxV-minV || 1);
-      const lo = minV - pad, hi = maxV + pad;
-      const x = Array.from({length:gridN},(_,i)=> lo + (i/(gridN-1))*(hi-lo));
-      const y = x.map(xi=>{
-        let s=0; for(const v of values){ const u=(xi-v)/h; s += Math.exp(-0.5*u*u); }
-        return s/(n*h*Math.sqrt(2*Math.PI));
-      });
-      const ymax = Math.max(...y, 1e-9);
-      return {x, y:y.map(d=>d/ymax)};
-    };
     const {x, y} = kde(vals);
-    const ctx = document.getElementById("bm_chart").getContext("2d");
-    if (window._bmChart) window._bmChart.destroy();
-    if (window.Chart){
+    const canvas = document.getElementById("bm_chart");
+    if (canvas && window.Chart){
+      const ctx = canvas.getContext("2d");
+      if (window._bmChart) window._bmChart.destroy();
       window._bmChart = new Chart(ctx,{
         type:'line',
         data:{ labels: x, datasets:[{label:'Normalized Price Distribution', data:y, fill:true, tension:0.35, pointRadius:0, borderWidth:2}]},
@@ -510,12 +786,12 @@
     const noteEl = document.getElementById("fcNote");
     const metaEl = document.getElementById("fcMeta");
     if (!fc.length){
-      noteEl.textContent = "No forecast.csv found or no rows. Add it via the training step.";
+      if (noteEl) noteEl.textContent = "No forecast.csv found or no rows. Add it via the training step.";
       if (_fcChart){ _fcChart.destroy(); _fcChart=null; }
       return;
     }
 
-    // Try to match benchmark controls; else fall back to first slice in file
+    // Match benchmark controls; else fall back
     const gpuSel = document.getElementById("bm_gpu")?.value;
     const regSel = document.getElementById("bm_region")?.value;
     const typSel = document.getElementById("bm_type")?.value;
@@ -541,40 +817,44 @@
     const p50 = rows.map(r=>r.p50);
     const p90 = rows.map(r=>r.p90);
 
-    const ctx = document.getElementById("fc_chart").getContext("2d");
+    const canvas = document.getElementById("fc_chart");
+    if (!canvas || !window.Chart) return;
+    const ctx = canvas.getContext("2d");
     if (_fcChart) _fcChart.destroy();
-    if (window.Chart){
-      // Band fill between p10 and p90 by stacking datasets
-      _fcChart = new Chart(ctx,{
-        type:'line',
-        data:{
-          labels,
-          datasets:[
-            {label:'P10', data:p10, pointRadius:0, borderWidth:1, tension:0.25, fill:false, hidden:true},
-            {label:'P10–P90 band', data:p90, pointRadius:0, borderWidth:0, tension:0.25, fill:{target:0}}, // fills to dataset 0 (P10)
-            {label:'P50', data:p50, pointRadius:0, borderWidth:2, tension:0.25}
-          ]
-        },
-        options:{
-          responsive:true,
-          plugins:{ legend:{display:true}},
-          scales:{
-            y:{ ticks:{ callback:v=>"$"+Number(v).toFixed(2)}},
-            x:{ ticks:{ autoSkip:true, maxRotation:0 }}
-          },
-          interaction:{ mode:'index', intersect:false }
-        }
-      });
-    }
 
-    metaEl.textContent = `${used.gpu} · ${used.region} · ${used.type} · ${used.duration} · ${used.count} GPUs` + (used.matched?"":" (showing available slice)");
-    noteEl.textContent = `Points: ${rows.length}. Band shows P10–P90; line shows P50.`;
+    _fcChart = new Chart(ctx,{
+      type:'line',
+      data:{
+        labels,
+        datasets:[
+          {label:'P10', data:p10, pointRadius:0, borderWidth:1, tension:0.25, fill:false, hidden:true},
+          {label:'P10–P90 band', data:p90, pointRadius:0, borderWidth:0, tension:0.25, fill:{target:0}}, // fill down to dataset 0 (P10)
+          {label:'P50', data:p50, pointRadius:0, borderWidth:2, tension:0.25}
+        ]
+      },
+      options:{
+        responsive:true,
+        plugins:{ legend:{display:true}},
+        scales:{
+          y:{ ticks:{ callback:v=>"$"+Number(v).toFixed(2)}},
+          x:{ ticks:{ autoSkip:true, maxRotation:0 }}
+        },
+        interaction:{ mode:'index', intersect:false }
+      }
+    });
+
+    if (metaEl) metaEl.textContent = `${used.gpu} · ${used.region} · ${used.type} · ${used.duration} · ${used.count} GPUs` + (used.matched?"":" (showing available slice)");
+    if (noteEl) noteEl.textContent = `Points: ${rows.length}. Band shows P10–P90; line shows P50.`;
   }
 
   // ---------------------- BOOT ----------------------
   loadAll();
 })();
+});
 </script>
+</body>
+</html>
+
 
 
 

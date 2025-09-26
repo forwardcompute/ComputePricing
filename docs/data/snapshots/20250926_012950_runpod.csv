@@ -1,0 +1,8 @@
+provider,region,gpu_model,type,duration,gpu_count,price_hourly_usd,source_url,fetched_at_utc
+RunPod,Global,H200 141 GB,On-Demand,1h,,3.59,https://www.runpod.io/pricing,2025-09-26 01:29:50
+RunPod,Global,H200 141 GB,On-Demand,1h,,3.59,https://www.runpod.io/pricing,2025-09-26 01:29:50
+RunPod,Global,H200 141 GB,On-Demand,1h,,3.59,https://www.runpod.io/pricing,2025-09-26 01:29:50
+RunPod,Global,H200 141 GB,On-Demand,1h,,3.59,https://www.runpod.io/pricing,2025-09-26 01:29:50
+RunPod,Global,H200 141 GB,On-Demand,1h,,3.59,https://www.runpod.io/pricing,2025-09-26 01:29:50
+RunPod,Global,H100 PCIE 80 GB,On-Demand,1h,,1.99,https://www.runpod.io/pricing,2025-09-26 01:29:50
+RunPod,Global,H100 PCIE 80 GB,On-Demand,1h,,1.99,https://www.runpod.io/pricing,2025-09-26 01:29:50

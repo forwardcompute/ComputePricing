@@ -1,2 +1,2 @@
 provider,region,gpu_model,type,duration,gpu_count,price_hourly_usd,source_url,fetched_at_utc
-SFCompute,US,H200,On-Demand,1h,1,1.4,https://www.sfcompute.com,2025-10-01 04:24:28
+SFCompute,US,H200,On-Demand,1h,1,1.4,https://www.sfcompute.com,2025-10-01 08:30:26

@@ -1,7 +1,7 @@
 provider,region,gpu_model,type,duration,gpu_count,price_hourly_usd,source_url,fetched_at_utc
 Lambda Labs,US,8X H100 SXM,On-Demand,1h,8,2.99,https://cloud.lambdalabs.com/pricing,2025-10-12 08:25:23
-Lambda Labs,US,1X H100 SXM,On-Demand,1h,1,3.29,https://cloud.lambdalabs.com/pricing,2025-10-12 08:25:23
 Lambda Labs,US,4X H100 SXM,On-Demand,1h,4,3.09,https://cloud.lambdalabs.com/pricing,2025-10-12 08:25:23
-Lambda Labs,US,1X H200,On-Demand,1h,1,1.49,https://cloud.lambdalabs.com/pricing,2025-10-12 08:25:23
 Lambda Labs,US,2X H100 SXM,On-Demand,1h,2,3.19,https://cloud.lambdalabs.com/pricing,2025-10-12 08:25:23
+Lambda Labs,US,1X H200,On-Demand,1h,1,1.49,https://cloud.lambdalabs.com/pricing,2025-10-12 08:25:23
+Lambda Labs,US,1X H100 SXM,On-Demand,1h,1,3.29,https://cloud.lambdalabs.com/pricing,2025-10-12 08:25:23
 Lambda Labs,US,1X H100 PCIE,On-Demand,1h,1,2.49,https://cloud.lambdalabs.com/pricing,2025-10-12 08:25:23
